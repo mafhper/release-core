@@ -16,14 +16,14 @@ Princípio arquitetural:
 ```yaml
 jobs:
   release:
-    uses: mafhper/release-core/.github/workflows/release.yml@v1.1.4
+    uses: mafhper/release-core/.github/workflows/release.yml@v1.1.5
     permissions:
       contents: write
     with:
       matrix: '[{ "os": "ubuntu-latest" }]'
 ```
 
-Sempre fixe a versão imutável (`@v1.1.4`), nunca `@main`. O Core é tratado como uma API de automação: uma mudança que quebra o contrato deve gerar `v2.0.0`.
+Sempre fixe a versão imutável (`@v1.1.5`), nunca `@main`. O Core é tratado como uma API de automação: uma mudança que quebra o contrato deve gerar `v2.0.0`.
 
 ## Inputs do workflow
 
@@ -42,14 +42,14 @@ prepare ──► build (matrix, fail-fast: false) ──► finalize
 ```
 
 - **prepare** (ubuntu): resolve/valida a tag, exporta a configuração, valida coerência, versão (`package.json` + `versions.files`), política de imagem, calcula `prev_tag`, detecta prerelease e cria/recupera o release **como rascunho** (idempotente, com retry). Se não há build declarado, marca `build_enabled=false`.
-- **build** (1 job por célula da matrix): instala só o necessário (apt/node/bun/rust conforme o contrato), instala as dependências do projeto pelo package manager declarado (`bun install --frozen-lockfile`/`npm ci`; projectos desktop ficam a cargo do `tauri-action`), executa gates → pre → build (ou `tauri-action` em projetos desktop), valida e envia artefatos com `--clobber` e retry.
+- **build** (1 job por célula da matrix): instala só o necessário (apt/node/bun/rust conforme o contrato), instala as dependências do projeto pelo package manager declarado (`bun install --frozen-lockfile`/`npm ci`) na `build.working_directory` — **sempre que `package_manager` é declarado, inclusive em projetos desktop** —, executa gates → pre → build (ou `tauri-action` em projetos desktop), valida e envia artefatos com `--clobber` e retry.
 - **finalize**: remonta o corpo (imagem + título/tagline + notas + seções + changelog em `<details>`), publica o release (`draft=false` e `prerelease` conforme semver) e atesta. Só roda se `prepare` passou e `build` passou ou foi pulado (nunca publica release parcial em caso de falha).
 
 ## Fases operacionais
 
 1. **Preparação** — checkout do consumidor (histórico completo) + bootstrap dos scripts do Core (referenciados pela mesma versão consumida, `github.action_ref`) em `$RUNNER_TEMP/.release-tools`, **fora do checkout do consumidor** para não contaminar lint/gates/testes do projeto; o bootstrap usa `git fetch` em `run:`, pois um `actions/checkout` auto-referencial (o próprio repositório do Core) quebra a materialização das actions do arquivo ("not our ref").
 2. **Validação** — barata e determinística, antes de qualquer build: config válida → tag válida → versão válida → versões consistentes → package manager coerente.
-3. **Toolchain** — somente o necessário declarado no contrato (`node`, `bun`, `rust`, `apt`), seguido da instalação das dependências do projeto (`bun install --frozen-lockfile`/`npm ci`).
+3. **Toolchain** — somente o necessário declarado no contrato (`node`, `bun`, `rust`, `apt`), seguido da instalação das dependências do projeto (`bun install --frozen-lockfile`/`npm ci`) em `build.working_directory` (default: raiz do repositório).
 4. **Gates / pre / build** — comandos declarativos; o Core não assume Vite, Next, Tauri, npm ou Bun.
 5. **Artefatos** — modelo 0..N: existir → não vazio → validação executavel → rename opcional → upload idempotente.
 6. **Imagem** — hard gate por `major.minor` (configurável por `tag`).

@@ -227,8 +227,8 @@ jobs:
           toolchain: ${{ env.RUST_TOOLCHAIN }}
 
       - name: Instalar dependências do projeto
-        if: env.PKG_MANAGER != '' && env.DESKTOP != 'true'
-        working-directory: ${{ env.DESKTOP_PROJECT_PATH }}
+        if: env.PKG_MANAGER != ''
+        working-directory: ${{ env.PROJECT_WORKDIR }}
         run: |
           case "$PKG_MANAGER" in
             bun) bun install --frozen-lockfile ;;
@@ -238,7 +238,7 @@ jobs:
 
       - name: Portões de qualidade
         if: env.GATES != '[]'
-        working-directory: ${{ env.DESKTOP_PROJECT_PATH }}
+        working-directory: ${{ env.PROJECT_WORKDIR }}
         run: |
           printf '%s' "$GATES" | node -e 'let s="";process.stdin.on("data",d=>s+=d).on("end",()=>{const v=JSON.parse(s);process.stdout.write(v.join("\u0000") + "\0")})' | while IFS= read -r -d '' cmd; do
             echo "» $cmd"
@@ -247,7 +247,7 @@ jobs:
 
       - name: Passos de preparação
         if: env.PRE_STEPS != '[]'
-        working-directory: ${{ env.DESKTOP_PROJECT_PATH }}
+        working-directory: ${{ env.PROJECT_WORKDIR }}
         run: |
           printf '%s' "$PRE_STEPS" | node -e 'let s="";process.stdin.on("data",d=>s+=d).on("end",()=>{const v=JSON.parse(s);process.stdout.write(v.join("\u0000") + "\0")})' | while IFS= read -r -d '' cmd; do
             echo "» $cmd"
@@ -256,7 +256,7 @@ jobs:
 
       - name: Compilar o aplicativo
         if: env.DESKTOP != 'true' && env.BUILD_COMMAND != ''
-        working-directory: ${{ env.DESKTOP_PROJECT_PATH }}
+        working-directory: ${{ env.PROJECT_WORKDIR }}
         run: bash -eu -c "$BUILD_COMMAND"
 
       - name: Definir diretório de cache de ferramentas do bundler (Tauri)

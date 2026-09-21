@@ -63,6 +63,21 @@ test("fixture tauri: desktop habilitado com Rust", () => {
   assert.equal(notes.stdout.trim(), "minor");
 });
 
+test("fixture tauri-npm: desktop + npm, working_directory separado do project_path", () => {
+  const cfg = FIX("tauri-npm", "release.config.json");
+  assert.equal(run(cfg, ["--get", "desktop"]).stdout.trim(), "true");
+  assert.equal(run(cfg, ["--get", "package_manager"]).stdout.trim(), "npm");
+  assert.equal(run(cfg, ["--get", "working_directory"]).stdout.trim(), ".");
+  assert.equal(run(cfg, ["--get", "desktop_project_path"]).stdout.trim(), "desktop");
+  const env = run(cfg, ["--env"]);
+  assertOk(env);
+  assert.match(env.stdout, /^PKG_MANAGER=npm$/m);
+  assert.match(env.stdout, /^NODE_VERSION=22$/m);
+  assert.match(env.stdout, /^DESKTOP=true$/m);
+  assert.match(env.stdout, /^PROJECT_WORKDIR=\.$/m);
+  assert.match(env.stdout, /^DESKTOP_PROJECT_PATH=desktop$/m);
+});
+
 test("regressão: config em .github/ resolve paths na raiz do repositório", () => {
   const dir = mkdtempSync(join(tmpdir(), "rwcfg-"));
   mkdirSync(join(dir, ".github"), { recursive: true });
@@ -90,6 +105,7 @@ test("defaults aplicados quando omissos", () => {
   assert.equal(run(file, ["--get", "language"]).stdout.trim(), "pt-BR");
   assert.equal(run(file, ["--get", "node"]).stdout.trim(), "");
   assert.equal(run(file, ["--get", "desktop"]).stdout.trim(), "false");
+  assert.equal(run(file, ["--get", "working_directory"]).stdout.trim(), ".");
   assert.equal(run(file, ["--get", "image_required"]).stdout.trim(), "true");
   assert.equal(run(file, ["--env"]).stdout.includes("RELEASE_TITLE=X"), true);
 });
@@ -116,6 +132,8 @@ const FAIL_CASES = [
   ["versions.files inválido (string)", () => tempConfig(JSON.stringify({ release: { title: "X" }, versions: { files: ["manifest.json"] } })).file, /deve ser \{ path, format, field \}/],
   ["versions.files campo ausente", () => tempConfig(JSON.stringify({ release: { title: "X" }, versions: { files: [{ path: "a.json", format: "json" }] } })).file, /versions\.files\[\]\.field/],
   ["versions.files format inválido", () => tempConfig(JSON.stringify({ release: { title: "X" }, versions: { files: [{ path: "a.yml", format: "yaml", field: "x" }] } })).file, /format deve ser "json" ou "toml"/],
+  ["working_directory absoluto", () => tempConfig(JSON.stringify({ release: { title: "X" }, build: { working_directory: "/abs" } })).file, /relativo à raiz/],
+  ["working_directory vazio", () => tempConfig(JSON.stringify({ release: { title: "X" }, build: { working_directory: "  " } })).file, /working_directory/],
   ["chave --get desconhecida", () => FIX("web/release.config.json"), /chave desconhecida em --get/],
 ];
 

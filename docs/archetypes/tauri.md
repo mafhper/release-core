@@ -24,7 +24,7 @@ concurrency:
 
 jobs:
   release:
-    uses: mafhper/release-core/.github/workflows/release.yml@v1.1.4
+    uses: mafhper/release-core/.github/workflows/release.yml@v1.1.5
     with:
       matrix: |-
         [
@@ -69,8 +69,35 @@ Cada célula é um job de build (fail-fast desativado). `args` é repassado ao `
 ## Regras ativas
 
 - `desktop.enabled: true` exige `build.rust`, proíbe `build.command` e `artifact` (o `tauri-action` publica os instaladores no release rascunho).
+- As dependências são instaladas na `build.working_directory` (default `.`) **mesmo com `desktop.enabled: true`**.
 - `apt` é instalado apenas em runners Linux.
 - Pelo menos `package.json` + `tauri.conf.json` + `Cargo.toml` devem bater com a tag.
+
+## Monorepo npm (raiz ≠ project_path)
+
+Quando o projeto é um monorepo com npm, instale a partir da raiz e aponte `desktop.project_path` para a pasta do app Tauri:
+
+```jsonc
+{
+  "build": {
+    "package_manager": "npm",
+    "node": "22",
+    "rust": "stable",
+    "working_directory": ".",
+    "apt": ["libwebkit2gtk-4.1-dev", "build-essential", "libxdo-dev"]
+  },
+  "desktop": { "enabled": true, "project_path": "apps/desktop" },
+  "versions": {
+    "files": [
+      { "path": "apps/desktop/package.json", "format": "json", "field": "version" },
+      { "path": "apps/desktop/src-tauri/tauri.conf.json", "format": "json", "field": "version" },
+      { "path": "apps/desktop/src-tauri/Cargo.toml", "format": "toml", "field": "package.version" }
+    ]
+  }
+}
+```
+
+O `beforeBuildCommand` do app Tauri continua sendo responsável por compilar o frontend a partir da raiz do monorepo.
 
 ## Observações
 

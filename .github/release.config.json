@@ -12,7 +12,7 @@
       "granularity": "tag"
     },
     "sections": {
-      "usage": "## Como usar\n\nAdicione o caller abaixo (`.github/workflows/release.yml`) no projeto consumidor e declare as diferenças em `.github/release.config.json`:\n\n```yaml\nname: Release\n\non:\n  push:\n    tags: [\"v*\"]\n\npermissions:\n  contents: write\n\nconcurrency:\n  group: release-${{ github.ref }}\n  cancel-in-progress: false\n\njobs:\n  release:\n    uses: mafhper/release-core/.github/workflows/release.yml@v1.1.4\n    with:\n      matrix: '[{\"os\":\"ubuntu-latest\"}]'\n```\n\nVeja [docs/archetypes](docs/archetypes) para os perfis web, extensão e Tauri.",
+      "usage": "## Como usar\n\nAdicione o caller abaixo (`.github/workflows/release.yml`) no projeto consumidor e declare as diferenças em `.github/release.config.json`:\n\n```yaml\nname: Release\n\non:\n  push:\n    tags: [\"v*\"]\n\npermissions:\n  contents: write\n\nconcurrency:\n  group: release-${{ github.ref }}\n  cancel-in-progress: false\n\njobs:\n  release:\n    uses: mafhper/release-core/.github/workflows/release.yml@v1.1.5\n    with:\n      matrix: '[{\"os\":\"ubuntu-latest\"}]'\n```\n\nVeja [docs/archetypes](docs/archetypes) para os perfis web, extensão e Tauri.",
       "extra": "## Política de imagem\n\nA imagem da release (`docs/images/releases/release.webp`) representa a linha `major.minor`. Reutilize no mesmo minor; é obrigatório alterá-la em nova linha `major.minor` (hard gate)."
     }
   },
