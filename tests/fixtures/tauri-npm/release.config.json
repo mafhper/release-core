@@ -1,0 +1,25 @@
+{
+  "release": {
+    "title": "IconCore",
+    "tagline": "Monorepo npm + Tauri: a raiz constrói, o app fica em desktop/.",
+    "language": "pt-BR",
+    "notes": { "granularity": "tag" }
+  },
+  "build": {
+    "package_manager": "npm",
+    "node": "22",
+    "rust": "stable",
+    "apt": ["libwebkit2gtk-4.1-dev", "build-essential", "libxdo-dev"],
+    "working_directory": "."
+  },
+  "desktop": {
+    "enabled": true,
+    "project_path": "desktop"
+  },
+  "versions": {
+    "files": [
+      { "path": "desktop/src-tauri/tauri.conf.json", "format": "json", "field": "version" },
+      { "path": "desktop/src-tauri/Cargo.toml", "format": "toml", "field": "package.version" }
+    ]
+  }
+}

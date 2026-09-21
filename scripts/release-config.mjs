@@ -156,6 +156,20 @@ function load(configPath) {
   const bun = build.bun ?? "";
   const rust = build.rust ?? "";
 
+  // Diretório onde as dependências do projeto são instaladas e os gates/pre/build
+  // rodam. É relativo à raiz do repositório consumidor e, por padrão, é a própria
+  // raiz. Existe para separar "onde o projeto é construído" (ex.: raiz de um
+  // monorepo) de `desktop.project_path` (o diretório que o tauri-action recebe).
+  const workingDirectory = build.working_directory ?? ".";
+  if (typeof workingDirectory !== "string" || workingDirectory.trim() === "") {
+    fail("build.working_directory deve ser um caminho (string não vazia).");
+  }
+  if (workingDirectory.startsWith("/") || /^[A-Za-z]:[\\/]/.test(workingDirectory)) {
+    fail(
+      `build.working_directory deve ser relativo à raiz do repositório (recebido: "${workingDirectory}").`,
+    );
+  }
+
   if (bun && packageManager !== "bun") {
     fail('build.bun declarado, mas build.package_manager não é "bun".');
   }
@@ -244,6 +258,7 @@ function load(configPath) {
       node,
       bun,
       rust,
+      workingDirectory,
       apt: requireStringArray(build.apt, "build", "apt"),
       gates: requireStringArray(build.gates, "build", "gates"),
       pre: requireStringArray(build.pre, "build", "pre"),
@@ -282,6 +297,7 @@ function getKey(cfg, key) {
     node: cfg.build.node,
     bun: cfg.build.bun,
     rust: cfg.build.rust,
+    working_directory: cfg.build.workingDirectory,
     apt: cfg.build.apt,
     gates: cfg.build.gates,
     pre: cfg.build.pre,
@@ -324,6 +340,7 @@ function printEnv(cfg) {
   emitEnvLine(lines, "NODE_VERSION", cfg.build.node);
   emitEnvLine(lines, "BUN_VERSION", cfg.build.bun);
   emitEnvLine(lines, "RUST_TOOLCHAIN", cfg.build.rust);
+  emitEnvLine(lines, "PROJECT_WORKDIR", cfg.build.workingDirectory);
   emitEnvLine(lines, "APT_DEPS", JSON.stringify(cfg.build.apt));
   emitEnvLine(lines, "GATES", JSON.stringify(cfg.build.gates));
   emitEnvLine(lines, "PRE_STEPS", JSON.stringify(cfg.build.pre));

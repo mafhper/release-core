@@ -1,6 +1,6 @@
 {
   "name": "@mafhper/release-core",
-  "version": "1.1.4",
+  "version": "1.1.5",
   "private": true,
   "description": "O protocolo de release reutilizável para GitHub Actions.",
   "scripts": {

@@ -20,6 +20,7 @@ Cada projeto do portfólio pode implementar seu próprio workflow de release: va
 
 - **Validação antes do build** — a tag `vX.Y.Z` é conferida contra `package.json` e `versions.files` (JSON/TOML); qualquer divergência falha antes de iniciar o build.
 - **Coerência do package manager** — `bun`/`npm` exigem evidência de lockfile e declaração consistente em `package.json#packageManager`.
+- **Instalação desacoplada do desktop** — dependências são instaladas sempre que `package_manager` é declarado, inclusive com `desktop.enabled: true` (o `beforeBuildCommand` do Tauri depende do workspace). A instalação usa `build.working_directory` (default `.`), separado do `desktop.project_path` entregue ao `tauri-action`.
 - **Build declarativo** — toolchain (node/bun/rust/apt), gates, pre-build e comando de build vêm do contrato; o Core não assume framework nem gerente de pacotes.
 - **Artefatos 0..N** — existência, validação executável, rename opcional e upload idempotente (`--clobber`).
 - **Política de imagem como hard gate** — `docs/images/releases/release.webp` representa a linha `major.minor`; nova linha exige mudança da imagem entre tags.
@@ -47,7 +48,7 @@ concurrency:
 
 jobs:
   release:
-    uses: mafhper/release-core/.github/workflows/release.yml@v1.1.4
+    uses: mafhper/release-core/.github/workflows/release.yml@v1.1.5
     with:
       matrix: '[{"os":"ubuntu-latest"}]'
 ```
@@ -78,7 +79,7 @@ O `release.config.json` é a fonte única da verdade do runtime — toolchain, g
 
 ## Versionamento
 
-O Core é tratado como uma API de automação. Consumidores fixam versões imutáveis (`@v1.1.4`); `@main` nunca é dependência permanente. Mudança incompatível no contrato gera `v2.0.0`. Tags publicadas não devem ser movidas.
+O Core é tratado como uma API de automação. Consumidores fixam versões imutáveis (`@v1.1.5`); `@main` nunca é dependência permanente. Mudança incompatível no contrato gera `v2.0.0`. Tags publicadas não devem ser movidas.
 
 ## Estrutura
 
