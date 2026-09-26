@@ -43,7 +43,7 @@ Cada célula é um job de build (fail-fast desativado). `args` é repassado ao `
   "release": {
     "title": "PersonalNews",
     "tagline": "Boletim pessoal com aplicativo desktop.",
-    "image": { "required": true, "granularity": "minor" },
+    "image": { "required": true, "granularity": "minor", "upload": true },
     "notes": { "granularity": "minor" } // desktop documenta por minor (vX.Y.md)
   },
   "build": {

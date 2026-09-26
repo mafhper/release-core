@@ -36,7 +36,7 @@ jobs:
   "release": {
     "title": "Spread",
     "tagline": "Aplicação web do portfólio.",
-    "image": { "required": true, "granularity": "minor" },
+    "image": { "required": true, "granularity": "minor", "upload": true },
     "notes": { "granularity": "tag" },
     "sections": {
       "usage": "## Uso\nAbra em https://mafhper.github.io/spread/"
@@ -62,3 +62,27 @@ jobs:
 ## Limitações
 
 - Não suporta deploy; para web com artefato estático (ex.: ZIP do dist), veja `extension.md`.
+
+## Imagem de release
+
+A arte é resolvida por tag, do mais específico ao mais genérico:
+
+`	ext
+docs/images/releases/release-v1.2.0-new.webp   correção (branch padrão)
+docs/images/releases/release-v1.2.0.webp       a tag
+docs/images/releases/release-v1.2.webp         a linha do minor
+docs/images/releases/release.webp              arquivo único (legado)
+`
+
+- **granularity: "minor"** exige arte nova só em nova linha major.minor; com
+  "tag", a cada versão. O gate compara a arte **que está na tag** com a da
+  tag anterior.
+- **upload: true** (default) anexa a arte como asset da release e faz o corpo
+  apontar para /releases/download/<tag>/<arquivo>, que pode ser corrigido sem
+  mover a tag. Use alse para manter a URL raw da tag.
+- **Corrigir depois da tag**: commite elease-v1.2.0-new.webp no branch padrão
+  e re-rode o workflow da tag. O sufixo -new é convenção de autoria: a
+  release não o expõe, e sobrescrever o arquivo da versão no branch padrão tem o
+  mesmo efeito.
+
+Detalhes em [../config-schema.md](../config-schema.md).

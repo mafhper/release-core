@@ -43,7 +43,7 @@ prepare ──► build (matrix, fail-fast: false) ──► finalize
 
 - **prepare** (ubuntu): resolve/valida a tag, exporta a configuração, valida coerência, versão (`package.json` + `versions.files`), política de imagem, calcula `prev_tag`, detecta prerelease e cria/recupera o release **como rascunho** (idempotente, com retry). Se não há build declarado, marca `build_enabled=false`.
 - **build** (1 job por célula da matrix): instala só o necessário (apt/node/bun/rust conforme o contrato), instala as dependências do projeto pelo package manager declarado (`bun install --frozen-lockfile`/`npm ci`) na `build.working_directory` — **sempre que `package_manager` é declarado, inclusive em projetos desktop** —, executa gates → pre → build (ou `tauri-action` em projetos desktop), valida e envia artefatos com `--clobber` e retry.
-- **finalize**: remonta o corpo (imagem + título/tagline + notas + seções + changelog em `<details>`), publica o release (`draft=false` e `prerelease` conforme semver) e atesta. Só roda se `prepare` passou e `build` passou ou foi pulado (nunca publica release parcial em caso de falha).
+- **finalize**: **publica a arte** (resolve, sobe o asset e define `IMAGE_URL`) e **depois**, em um step seguinte, remonta o corpo (imagem + título/tagline + notas + seções + changelog em `<details>`); publica o release (`draft=false` e `prerelease` conforme semver) e atesta. Só roda se `prepare` passou e `build` passou ou foi pulado (nunca publica release parcial em caso de falha).
 
 ## Fases operacionais
 
@@ -52,7 +52,7 @@ prepare ──► build (matrix, fail-fast: false) ──► finalize
 3. **Toolchain** — somente o necessário declarado no contrato (`node`, `bun`, `rust`, `apt`), seguido da instalação das dependências do projeto (`bun install --frozen-lockfile`/`npm ci`) em `build.working_directory` (default: raiz do repositório).
 4. **Gates / pre / build** — comandos declarativos; o Core não assume Vite, Next, Tauri, npm ou Bun.
 5. **Artefatos** — modelo 0..N: existir → não vazio → validação executavel → rename opcional → upload idempotente.
-6. **Imagem** — hard gate por `major.minor` (configurável por `tag`).
+6. **Imagem** — resolvida por tag (`release-vX.Y.Z.webp`, com fallback para a linha do minor e para o arquivo legado), anexada como asset da release e corrigível depois da tag. O hard gate de `major.minor` (ou `tag`) vale para a arte **que está na tag**; a correção, lida do branch padrão, fica de fora por definição.
 7. **Corpo da release** — imagem, título, tagline, notas editoriais, seções, changelog automático.
 8. **Publicação** — idempotente e com retry.
 
@@ -63,6 +63,29 @@ prepare ──► build (matrix, fail-fast: false) ──► finalize
 - O corpo é reaplicado no final via PATCH.
 - Reexecutar o workflow (rerun) não gera `Release already exists`; a partir de `workflow_dispatch` também é possível.
 - `concurrency` com `cancel-in-progress: false` — release não é job descartável.
+
+## Scripts do Core
+
+Bootstrapados em `$RUNNER_TEMP/.release-tools` e executados com `node`/`bash`.
+Todos os testes ficam em `tests/` e rodam com `node --test`.
+
+| Script | Papel | Roda em |
+|---|---|---|
+| `release-config.mjs` | Lê e valida o `release.config.json`; emite env (`--env`) ou um valor (`--get`) | `prepare`, `finalize` |
+| `check-release-version.mjs` | Confere a tag contra `package.json` e `versions.files` | `prepare` |
+| `prev-tag.mjs` | Maior tag `vX.Y.Z` anterior, por componente de semver | `prepare` |
+| `resolve-image.mjs` | Resolve a arte por tag (5 candidatos, incl. a correção do branch padrão); emite `KEY=VALUE` ou `--json` | `prepare`, `finalize` |
+| `image-step.sh` | Baixa a correção, resolve, sobe o asset com guarda por `digest` e define `IMAGE_URL` | `prepare` (resolve), `finalize` (publish) |
+| `release-body.sh` | Monta o corpo (imagem, título, tagline, notas, seções, changelog) | `finalize` |
+
+### `$GITHUB_ENV` entre steps
+
+`image-step.sh publish` e `release-body.sh` **não podem rodar no mesmo step**.
+O primeiro escreve `IMAGE_URL` no `$GITHUB_ENV`, que o GitHub só aplica aos
+steps seguintes; e um `export` dentro do script não volta para o shell que o
+chamou, porque o script roda como processo filho. Juntos no mesmo step, o
+corpo cairia no caminho legado e exibiria a arte antiga da tag em vez do
+asset. Investigação aberta em `RC2`.
 
 ## Permissões
 

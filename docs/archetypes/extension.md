@@ -36,7 +36,7 @@ jobs:
   "release": {
     "title": "Kaes Keid Inspector",
     "tagline": "Extensão para inspeção de páginas.",
-    "image": { "required": true, "granularity": "minor" },
+    "image": { "required": true, "granularity": "minor", "upload": true },
     "notes": { "granularity": "tag" }
   },
   "build": {
