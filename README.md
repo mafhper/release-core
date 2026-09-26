@@ -46,7 +46,7 @@ concurrency:
 
 jobs:
   release:
-    uses: mafhper/release-core/.github/workflows/release.yml@v1.2.3
+    uses: mafhper/release-core/.github/workflows/release.yml@v1.2.4
     with:
       matrix: '[{"os":"ubuntu-latest"}]'
 ```
@@ -77,7 +77,7 @@ O `release.config.json` é a fonte única da verdade do runtime — toolchain, g
 
 ## Versionamento
 
-É tratado como uma API de automação. Consumidores fixam versões imutáveis (`@v1.2.3`); `@main` nunca é dependência permanente. Mudança incompatível no contrato gera `v2.0.0`. Tags publicadas não devem ser movidas.
+É tratado como uma API de automação. Consumidores fixam versões imutáveis (`@v1.2.4`); `@main` nunca é dependência permanente. Mudança incompatível no contrato gera `v2.0.0`. Tags publicadas não devem ser movidas.
 
 ## Estrutura
 
@@ -114,7 +114,7 @@ tests/
 ## Roadmap
 
 - Milestones do portfólio: regras de proteção de `main` e tags, Dependabot (Actions/npm), CodeQL, deploy separado, matrix multiplataforma, health checks.
-- Próximos itens do Core: checksum SHA-256 dos artefatos, artefatos required/opcionais por plataforma, diagnósticos aprimorados.
+- Próximos itens do Core: política de identidade e substituição de artefatos (a guarda de `digest` hoje protege só a arte; binários são reenviados com `--clobber`), artefatos required/opcionais por plataforma, diagnósticos aprimorados.
 
 ## Licença
 
