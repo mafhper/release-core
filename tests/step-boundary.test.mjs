@@ -255,6 +255,56 @@ test('projeto sem imagem, com required desligado, monta o corpo sem arte', { ski
   assert.match(text, /^# Demo$/m, 'o resto do corpo continua igual');
 });
 
+test('com title_in_body ligado, o H1 repete o nome que a arte já mostra', { skip }, () => {
+  // O padrão. Serve para fixar o comportamento: o nome aparece duas vezes, na
+  // imagem e no H1. Quem desenhou a arte com o wordmark é quem desliga.
+  const { runnerTemp, baseEnv } = makeConsumer();
+  const bodyFile = join(runnerTemp, 'body.md');
+
+  const body = runStep(
+    RELEASE_BODY,
+    { ...baseEnv, IMAGE_URL: 'https://example.test/arte.webp', IMAGE_TITLE_IN_BODY: 'true' },
+    [bodyFile],
+  );
+
+  assert.equal(body.status, 0, `não deveria falhar:\n${body.stderr}`);
+  const text = readFileSync(bodyFile, 'utf8');
+  assert.match(text, /^# Demo$/m, 'o padrão mantém o H1');
+});
+
+test('com title_in_body desligado, o H1 some e a arte fica sendo o título', { skip }, () => {
+  // O caso do Core: a arte carrega o wordmark, então repetir o nome em H1 é
+  // repetir a mesma frase a dois pixels de distância.
+  const { runnerTemp, baseEnv } = makeConsumer();
+  const bodyFile = join(runnerTemp, 'body.md');
+
+  const body = runStep(
+    RELEASE_BODY,
+    { ...baseEnv, IMAGE_URL: 'https://example.test/arte.webp', IMAGE_TITLE_IN_BODY: 'false' },
+    [bodyFile],
+  );
+
+  assert.equal(body.status, 0, `não deveria falhar:\n${body.stderr}`);
+  const text = readFileSync(bodyFile, 'utf8');
+  assert.doesNotMatch(text, /^# Demo$/m, 'o H1 não deveria estar no corpo');
+  assert.match(text, /!\[Demo\]\(https:\/\/example\.test\/arte\.webp\)/, 'a imagem continua no topo');
+  assert.match(text, /Nota da 1\.2\.0\./, 'o resto do corpo segue igual');
+});
+
+test('sem title_in_body declarado, o padrão é o H1 ligado', { skip }, () => {
+  // A retrocompatibilidade é o que protege os 4 consumidores: quem não declarar
+  // nada continua recebendo o H1, mesmo que a arte não carregue o nome.
+  const { runnerTemp, baseEnv } = makeConsumer();
+  const bodyFile = join(runnerTemp, 'body.md');
+  const env = { ...baseEnv, IMAGE_URL: 'https://example.test/arte.webp' };
+  delete env.IMAGE_TITLE_IN_BODY;
+
+  const body = runStep(RELEASE_BODY, env, [bodyFile]);
+
+  assert.equal(body.status, 0, `não deveria falhar:\n${body.stderr}`);
+  assert.match(readFileSync(bodyFile, 'utf8'), /^# Demo$/m);
+});
+
 test('os dois scripts no mesmo step não produzem uma release plausível e errada', { skip }, () => {
   // O caso original: image-step.sh e release-body.sh no mesmo run:. O
   // $GITHUB_ENV não vale dentro do próprio step, então o corpo não enxerga a

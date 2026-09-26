@@ -191,6 +191,14 @@ function load(configPath) {
   if (typeof imageCorrectionSuffix !== "string" || imageCorrectionSuffix.trim() === "") {
     fail("release.image.correction_suffix deve ser um sufixo (string não vazia).");
   }
+  // O H1 do corpo repete o nome que a arte já mostra. Quem desenha a arte com o
+  // wordmark dentro (que é o caso do próprio Core) pode desligar o H1; o padrão
+  // é ligado porque nem toda arte carrega o nome, e sem H1 um corpo sem imagem
+  // fica sem título.
+  const imageTitleInBody = image.title_in_body ?? true;
+  if (typeof imageTitleInBody !== "boolean") {
+    fail("release.image.title_in_body deve ser booleano.");
+  }
 
   const sections = release.sections ?? {};
 
@@ -307,6 +315,7 @@ function load(configPath) {
       imageUpload,
       imageAllowCorrection,
       imageCorrectionSuffix,
+      imageTitleInBody,
       usage: sections.usage ?? "",
       extra: sections.extra ?? "",
     },
@@ -354,6 +363,7 @@ function getKey(cfg, key) {
     image_upload: cfg.release.imageUpload,
     image_allow_correction: cfg.release.imageAllowCorrection,
     image_correction_suffix: cfg.release.imageCorrectionSuffix,
+    image_title_in_body: cfg.release.imageTitleInBody,
     section_usage: cfg.release.usage,
     section_extra: cfg.release.extra,
     package_manager: cfg.build.packageManager,
@@ -405,6 +415,7 @@ function printEnv(cfg) {
   emitEnvLine(lines, "IMAGE_UPLOAD", String(cfg.release.imageUpload));
   emitEnvLine(lines, "IMAGE_ALLOW_CORRECTION", String(cfg.release.imageAllowCorrection));
   emitEnvLine(lines, "IMAGE_CORRECTION_SUFFIX", cfg.release.imageCorrectionSuffix);
+  emitEnvLine(lines, "IMAGE_TITLE_IN_BODY", String(cfg.release.imageTitleInBody));
   emitEnvLine(lines, "PKG_MANAGER", cfg.build.packageManager);
   emitEnvLine(lines, "NODE_VERSION", cfg.build.node);
   emitEnvLine(lines, "BUN_VERSION", cfg.build.bun);

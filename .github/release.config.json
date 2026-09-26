@@ -6,7 +6,8 @@
     "image": {
       "path": "docs/images/releases/release.webp",
       "required": true,
-      "granularity": "minor"
+      "granularity": "minor",
+      "title_in_body": false
     },
     "notes": {
       "granularity": "tag"

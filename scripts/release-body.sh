@@ -46,7 +46,16 @@ elif [ "${IMAGE_REQUIRED:-true}" = "true" ]; then
   exit 1
 fi
 
-printf -v out '%s\n# %s\n' "$out" "$RELEASE_TITLE"
+# Título do corpo. Repetir o nome aqui duplica o que a arte já mostra: numa
+# release cuja arte carrega o wordmark, o leitor vê o nome duas vezes em dois
+# pixels de distância. Quem desenha a arte decide: image.title_in_body=false
+# desliga o H1. O padrão é ligado porque nem toda arte carrega o nome, e um
+# corpo sem imagem ficaria sem título.
+if [ "${IMAGE_TITLE_IN_BODY:-true}" = "true" ]; then
+  printf -v out '%s\n# %s\n' "$out" "$RELEASE_TITLE"
+else
+  printf -v out '%s\n' "$out"
+fi
 
 if [ -n "${RELEASE_TAGLINE:-}" ]; then
   printf -v out '%s\n> %s\n' "$out" "$RELEASE_TAGLINE"

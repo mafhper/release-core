@@ -107,7 +107,20 @@ test("defaults aplicados quando omissos", () => {
   assert.equal(run(file, ["--get", "desktop"]).stdout.trim(), "false");
   assert.equal(run(file, ["--get", "working_directory"]).stdout.trim(), ".");
   assert.equal(run(file, ["--get", "image_required"]).stdout.trim(), "true");
+  // O H1 do corpo é o padrão: sem declare nada, os 4 consumidores continuam
+  // recebendo o título, mesmo que a arte não carregue o nome.
+  assert.equal(run(file, ["--get", "image_title_in_body"]).stdout.trim(), "true");
   assert.equal(run(file, ["--env"]).stdout.includes("RELEASE_TITLE=X"), true);
+});
+
+test("image.title_in_body desligado vai para o env", () => {
+  const { file } = tempConfig(
+    JSON.stringify({ release: { title: "X", image: { title_in_body: false } } }),
+  );
+  const res = run(file, ["--env"]);
+  assertOk(res);
+  assert.equal(res.stdout.includes("IMAGE_TITLE_IN_BODY=false"), true);
+  assert.equal(run(file, ["--get", "image_title_in_body"]).stdout.trim(), "false");
 });
 
 const FAIL_CASES = [
@@ -119,6 +132,7 @@ const FAIL_CASES = [
   ["language inválida", () => tempConfig(JSON.stringify({ release: { title: "X", language: "fr" } })).file, /release\.language deve ser "en" ou "pt-BR"/],
   ["notes.granularity inválida", () => tempConfig(JSON.stringify({ release: { title: "X", notes: { granularity: "patch" } } })).file, /notes\.granularity deve ser "tag" ou "minor"/],
   ["image.granularity inválida", () => tempConfig(JSON.stringify({ release: { title: "X", image: { granularity: "patch" } } })).file, /image\.granularity deve ser "tag" ou "minor"/],
+  ["image.title_in_body inválido", () => tempConfig(JSON.stringify({ release: { title: "X", image: { title_in_body: "nao" } } })).file, /image\.title_in_body deve ser booleano/],
   ["bun sem lockfile", () => { const { dir, file } = tempConfig(JSON.stringify({ release: { title: "X" }, build: { package_manager: "bun" } })); writeFileSync(join(dir, "package.json"), "{}", "utf8"); return file; }, /bun\.lock/],
   ["npm sem lockfile", () => { const { dir, file } = tempConfig(JSON.stringify({ release: { title: "X" }, build: { package_manager: "npm" } })); writeFileSync(join(dir, "package.json"), "{}", "utf8"); return file; }, /package-lock\.json/],
   ["packageManager divergente", () => { const { dir, file } = tempConfig(JSON.stringify({ release: { title: "X" }, build: { package_manager: "npm" } })); writeFileSync(join(dir, "package.json"), JSON.stringify({ packageManager: "bun@1.3.13" }), "utf8"); writeFileSync(join(dir, "package-lock.json"), "{}", "utf8"); return file; }, /package\.json#packageManager/],

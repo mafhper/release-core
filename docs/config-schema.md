@@ -16,7 +16,8 @@ O contrato é pequeno, declarativo e validado pelo helper `scripts/release-confi
       "ext": ".webp",                      // opcional: só com path = diretório
       "upload": true,                      // opcional: anexa a arte como asset da release
       "allow_correction": true,            // opcional: aceita <arquivo>-new do branch padrão
-      "correction_suffix": "-new"          // opcional
+      "correction_suffix": "-new",         // opcional
+      "title_in_body": true                // opcional: H1 com o nome no corpo (ver abaixo)
     },
     "notes": { "granularity": "tag" },     // "tag" | "minor"
     "sections": {
@@ -69,6 +70,7 @@ O contrato é pequeno, declarativo e validado pelo helper `scripts/release-confi
 | `release.image.upload` | `true` |
 | `release.image.allow_correction` | `true` |
 | `release.image.correction_suffix` | `-new` |
+| `release.image.title_in_body` | `true` |
 | `release.notes.granularity` | `tag` |
 | `build.node` | `22` se `package_manager` for `npm`; senão vazio |
 | `build.working_directory` | `.` (raiz do repositório) |
@@ -81,7 +83,7 @@ O contrato é pequeno, declarativo e validado pelo helper `scripts/release-confi
 - `release.title` é obrigatório (não vazio).
 - `language`, `notes.granularity`, `image.granularity` são enums.
 - `image.path` é um arquivo (formato legado) ou um diretório; com diretório, `image.ext` precisa começar com ponto.
-- `image.upload`, `image.allow_correction` são booleanos; `image.correction_suffix` é string não vazia.
+- `image.upload`, `image.allow_correction`, `image.title_in_body` são booleanos; `image.correction_suffix` é string não vazia.
 - `package_manager` exige evidência: `bun` → `bun.lock`/`bun.lockb`; `npm` → `package-lock.json`. O valor de `package.json#packageManager` deve ser coerente.
 - `bun` declarado exige `package_manager: "bun"`; `npm` exige `node` com versão.
 - `build.working_directory` deve ser um caminho relativo à raiz do repositório.
@@ -156,6 +158,17 @@ corrigida de novo.
 
 Com `image.upload: false`, a correção volta a não ser servível (não há URL
 estável fora da tag) e o corpo usa a URL raw da tag.
+
+### O nome no corpo: `image.title_in_body`
+
+O corpo começa com a arte e, logo abaixo, com um H1 com `release.title`. Se a
+arte já carrega o wordmark — o caso do próprio Core — o leitor vê o nome duas
+vezes, em dois pixels de distância. `image.title_in_body: false` desliga o H1
+e deixa a imagem ser o título.
+
+O padrão é `true` porque nem toda arte carrega o nome, e um corpo **sem**
+imagem ficaria sem título nenhum. Quem desliga precisa ter a arte com o
+wordmark; quem não tem, deixa o padrão.
 
 ### Guarda contra troca acidental de arte já publicada
 
