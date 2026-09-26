@@ -142,7 +142,7 @@ jobs:
           : > "$GITHUB_ENV"
           bash "$GITHUB_WORKSPACE/scripts/image-step.sh" publish >/dev/null
           # simula o runner: o GITHUB_ENV vira variavel de ambiente no step seguinte
-          while IFS= read -r line; do export "$line"; done < "$GITHUB_ENV"
+          while IFS='=' read -r key value; do export "$key=$value"; done < "$GITHUB_ENV"
           cd "$tmp"
           bash "$GITHUB_WORKSPACE/scripts/release-body.sh" "$tmp/body.md" >/dev/null
           grep -q '!\[Demo\](https://github.com/mafhper/demo/releases/download/v1.2.0/release-v1.2.0.webp)' "$tmp/body.md"
