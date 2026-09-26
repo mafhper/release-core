@@ -1,7 +1,7 @@
 # Release Core
 
 <p align="center">
-  <img src="docs/images/logo/icon-512.png" alt="Release Core" width="160">
+  <img src="docs/images/assets/banner.webp" alt="Release Core" width="100%">
 </p>
 
 [![CI](https://github.com/mafhper/release-core/actions/workflows/ci.yml/badge.svg)](https://github.com/mafhper/release-core/actions/workflows/ci.yml)
@@ -48,7 +48,7 @@ concurrency:
 
 jobs:
   release:
-    uses: mafhper/release-core/.github/workflows/release.yml@v1.1.5
+    uses: mafhper/release-core/.github/workflows/release.yml@v1.2.3
     with:
       matrix: '[{"os":"ubuntu-latest"}]'
 ```
