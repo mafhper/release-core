@@ -45,6 +45,24 @@ test("ordem de candidatos: correção antes do arquivo da tag, legado por últim
   ]);
 });
 
+test("o nome canônico do asset nunca carrega o sufixo de correção", () => {
+  const names = candidatesFor(SPEC, "v1.2.0").map((c) => `${c.name} -> ${c.canonical}`);
+  assert.deepEqual(names, [
+    "release-v1.2.0-new.webp -> release-v1.2.0.webp",
+    "release-v1.2.0.webp -> release-v1.2.0.webp",
+    "release-v1.2-new.webp -> release-v1.2.webp",
+    "release-v1.2.webp -> release-v1.2.webp",
+    "release.webp -> release.webp",
+  ]);
+});
+
+test("sufixo de correção customizado também some do nome do asset", () => {
+  const spec = { ...SPEC, correctionSuffix: "-corrigido" };
+  const c = candidatesFor(spec, "v1.2.0")[0];
+  assert.equal(c.name, "release-v1.2.0-corrigido.webp");
+  assert.equal(c.canonical, "release-v1.2.0.webp");
+});
+
 test("A: arquivo por versão tem precedência sobre minor e legado", () => {
   const exists = tree([
     "root/docs/images/releases/release-v1.2.0.webp",
@@ -84,8 +102,8 @@ test("C: a correção do branch padrão vence o arquivo da tag", () => {
   assert.equal(r.name, "release-v1.2.0-new.webp");
   assert.equal(r.source, "branch");
   assert.equal(r.isCorrection, true);
-  // O asset é o próprio nome do arquivo: é o que permite reenviar depois.
-  assert.equal(r.assetName, "release-v1.2.0-new.webp");
+  // A release não vê a terminologia de correção: o asset é o nome canônico.
+  assert.equal(r.assetName, "release-v1.2.0.webp");
 });
 
 test("C: allow_correction=false ignora o sufixo -new", () => {
@@ -209,4 +227,32 @@ test("CLI: sem --json imprime KEY=VALUE para $GITHUB_ENV", () => {
   assert.equal(env.IMAGE_SOURCE, "tag");
   assert.equal(env.IMAGE_IS_CORRECTION, "false");
   assert.equal(env.IMAGE_ASSET_NAME, "release.webp");
+});
+
+test("CLI: a correção sai no env com nome próprio e asset canônico", () => {
+  const dir = mkdtempSync(join(tmpdir(), "rimg-"));
+  const imgDir = join(dir, "docs", "images", "releases");
+  mkdirSync(imgDir, { recursive: true });
+  writeFileSync(join(imgDir, "release-v1.2.0-new.webp"), "corrigido", "utf8");
+  const config = join(dir, "release.config.json");
+  writeFileSync(
+    config,
+    JSON.stringify({ release: { title: "Demo", image: { path: "docs/images/releases" } } }),
+    "utf8",
+  );
+
+  const res = spawnSync(process.execPath, [SCRIPT, config, "v1.2.0", "--root", dir], {
+    encoding: "utf8",
+  });
+  assert.equal(res.status, 0, res.stderr);
+  const env = Object.fromEntries(
+    res.stdout
+      .trim()
+      .split("\n")
+      .map((line) => line.split("=")),
+  );
+  assert.equal(env.IMAGE_RESOLVED_NAME, "release-v1.2.0-new.webp");
+  assert.equal(env.IMAGE_ASSET_NAME, "release-v1.2.0.webp");
+  assert.equal(env.IMAGE_IS_CORRECTION, "true");
+  assert.equal(env.IMAGE_SOURCE, "tag");
 });

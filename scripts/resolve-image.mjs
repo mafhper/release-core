@@ -30,22 +30,28 @@ export function stemsFor(tag) {
 }
 
 /**
- * Ordem de resolução. Cada candidato é [nome, base de busca, origem].
+ * Ordem de resolução. Cada candidato é { name, canonical, from }.
+ *  - `name`: o arquivo como o autor o nomeou (inclui o sufixo de correção).
+ *  - `canonical`: o mesmo arquivo sem o sufixo de correção. É o nome do asset
+ *    e o da URL no corpo: a release não expõe a terminologia de correção, e o
+ *    link continua válido se a arte for corrigida de novo.
  *  - origem "tag": arquivo do checkout da tag (imutável).
- *  - origem "branch": arquivo baixado do branch padrão (correção).
+ *  - origem "correction": arquivo de correção, do branch padrão ou da própria tag.
  */
 export function candidatesFor(spec, tag) {
   const { prefix, ext, correctionSuffix, allowCorrection } = spec;
   const list = [];
   for (const stem of stemsFor(tag)) {
+    const canonical = `${prefix}-${stem}${ext}`;
     if (allowCorrection) {
-      list.push({ name: `${prefix}-${stem}${correctionSuffix}${ext}`, from: "correction" });
+      list.push({ name: `${prefix}-${stem}${correctionSuffix}${ext}`, canonical, from: "correction" });
     }
-    list.push({ name: `${prefix}-${stem}${ext}`, from: "tag" });
+    list.push({ name: canonical, canonical, from: "tag" });
   }
   // Legado: um arquivo único, sem versão. É o que existia antes da resolução
   // por tag e continua sendo o último recurso.
-  list.push({ name: `${prefix}${ext}`, from: "tag" });
+  const legacy = `${prefix}${ext}`;
+  list.push({ name: legacy, canonical: legacy, from: "tag" });
   return list;
 }
 
@@ -87,9 +93,9 @@ export function resolveImage(spec, tag, paths = {}, exists = existsSync) {
       // cópia baixada do branch padrão (precisa do asset).
       source: hit.inTag ? "tag" : "branch",
       isCorrection: candidate.from === "correction",
-      // O asset é sempre o nome do arquivo resolvido: é ele que permite
-      // reenviar a arte depois, sem mover a tag.
-      assetName: candidate.name,
+      // O asset é sempre o nome canônico: é o que a release publica e o que a
+      // URL do corpo usa, sem a terminologia de correção.
+      assetName: candidate.canonical,
       tried,
     };
   }

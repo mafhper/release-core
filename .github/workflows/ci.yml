@@ -74,6 +74,8 @@ jobs:
           bash "$GITHUB_WORKSPACE/scripts/image-step.sh" resolve
           grep -q '^IMAGE_RESOLVED_NAME=release-v1.2.0-new.webp$' "$GITHUB_ENV"
           grep -q '^IMAGE_IS_CORRECTION=true$' "$GITHUB_ENV"
+          # o asset usa o nome canônico: a release não expõe o -new
+          grep -q '^IMAGE_ASSET_NAME=release-v1.2.0.webp$' "$GITHUB_ENV"
           # publish sem upload: cai na URL raw da tag
           IMAGE_UPLOAD=false bash "$GITHUB_WORKSPACE/scripts/image-step.sh" publish
           grep -q '^IMAGE_URL=https://raw.githubusercontent.com/mafhper/demo/v1.2.0/img/releases/release-v1.2.0-new.webp$' "$GITHUB_ENV"
@@ -83,6 +85,55 @@ jobs:
           cd "$tmp"
           bash "$TOOLS_DIR/scripts/release-body.sh" "$tmp/body.md" >/dev/null
           grep -q '!\[Demo\](https://raw.githubusercontent.com/mafhper/demo/v1.2.0/img/releases/release-v1.2.0-new.webp)' "$tmp/body.md"
+
+      - name: Smoke test da guarda por digest
+        run: |
+          tmp="$(mktemp -d)"
+          mkdir -p "$tmp/img/releases" "$tmp/.github" "$tmp/rt" "$tmp/stub"
+          printf 'arte-corrigida' > "$tmp/img/releases/release-v1.2.0-new.webp"
+          printf '{"release":{"title":"Demo","image":{"path":"img/releases/release.webp"}}}' > "$tmp/.github/release.config.json"
+          cat > "$tmp/stub/gh" <<'STUB'
+          #!/usr/bin/env bash
+          case "$1" in
+            api) cat "$GH_STUB_RELEASES" ;;
+            release) [ "$2" = "upload" ] && { echo "$@" >> "$GH_STUB_UPLOADS"; exit 0; } ;;
+          esac
+          exit 0
+          STUB
+          chmod +x "$tmp/stub/gh"
+          export PATH="$tmp/stub:$PATH"
+          export GH_STUB_UPLOADS="$tmp/uploads.txt" GH_STUB_RELEASES="$tmp/r.json"
+          : > "$GH_STUB_UPLOADS"
+          export REPO=mafhper/demo TAG=v1.2.0 PROJECT_ROOT="$tmp" RUNNER_TEMP="$tmp/rt"
+          export GITHUB_ENV="$tmp/env" TOOLS_DIR="$GITHUB_WORKSPACE" CONFIG_FILE="$tmp/.github/release.config.json"
+          export IMAGE_DIR=img/releases IMAGE_PREFIX=release IMAGE_EXT=.webp IMAGE_CORRECTION_SUFFIX=-new
+          export IMAGE_ALLOW_CORRECTION=true IMAGE_UPLOAD=true
+          set -e
+          digest="sha256:$(sha256sum "$tmp/img/releases/release-v1.2.0-new.webp" | cut -d' ' -f1)"
+          size="$(wc -c < "$tmp/img/releases/release-v1.2.0-new.webp" | tr -d ' ')"
+          run() { : > "$GITHUB_ENV"; bash "$GITHUB_WORKSPACE/scripts/image-step.sh" publish 2>&1; }
+          # publicada com o mesmo conteudo: nao reenvia
+          printf '[{"tag_name":"v1.2.0","draft":false,"assets":[{"name":"release-v1.2.0.webp","digest":"%s","size":%s}]}]' "$digest" "$size" > "$GH_STUB_RELEASES"
+          run | grep -q "nada a reenviar"
+          [ ! -s "$GH_STUB_UPLOADS" ]
+          grep -q 'IMAGE_URL=https://github.com/mafhper/demo/releases/download/v1.2.0/release-v1.2.0.webp' "$GITHUB_ENV"
+          # publicada com conteudo diferente: falha
+          printf '[{"tag_name":"v1.2.0","draft":false,"assets":[{"name":"release-v1.2.0.webp","digest":"sha256:deadbeef","size":1}]}]' > "$GH_STUB_RELEASES"
+          if run >/dev/null 2>&1; then echo "esperava falhar"; exit 1; fi
+          # rascunho com conteudo diferente: substitui
+          printf '[{"tag_name":"v1.2.0","draft":true,"assets":[{"name":"release-v1.2.0.webp","digest":"sha256:deadbeef","size":1}]}]' > "$GH_STUB_RELEASES"
+          run >/dev/null
+          grep -q upload "$GH_STUB_UPLOADS"
+          # release nova: envia
+          printf '[{"tag_name":"v1.2.0","draft":true,"assets":[]}]' > "$GH_STUB_RELEASES"
+          : > "$GH_STUB_UPLOADS"
+          run >/dev/null
+          grep -q 'release-v1.2.0.webp' "$GH_STUB_UPLOADS"
+          # asset antigo sem digest: compara por tamanho
+          printf '[{"tag_name":"v1.2.0","draft":false,"assets":[{"name":"release-v1.2.0.webp","size":%s}]}]' "$size" > "$GH_STUB_RELEASES"
+          : > "$GH_STUB_UPLOADS"
+          run | grep -q "nada a reenviar"
+          [ ! -s "$GH_STUB_UPLOADS" ]
 
   actionlint:
     runs-on: ubuntu-latest

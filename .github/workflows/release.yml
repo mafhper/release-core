@@ -130,9 +130,10 @@ jobs:
             echo "::error::Nenhuma arte de release encontrada para ${{ steps.tag.outputs.tag }} em $IMAGE_DIR."; exit 1
           fi
           prev_tag="${{ steps.versions.outputs.prev_tag }}"
-          # A checagem de "precisa mudar" vale para a arte que está na tag; a
-          # correção vem do branch padrão e não participa do diff entre tags.
-          if [ -n "$prev_tag" ] && [ "$IMAGE_IS_CORRECTION" != "true" ] && [ -n "$IMAGE_RESOLVED_PATH" ]; then
+          # O gate de "precisa mudar" vale para a arte que está na tag. Arte vinda
+          # do branch padrão (correção, com ou sem o sufixo -new) não participa do
+          # diff entre tags, porque aquele commit não a contém.
+          if [ -n "$prev_tag" ] && [ "$IMAGE_SOURCE" = "tag" ] && [ -n "$IMAGE_RESOLVED_PATH" ]; then
             need_change=0
             case "$IMAGE_GRANULARITY" in
               tag) need_change=1 ;;
