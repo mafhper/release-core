@@ -78,7 +78,7 @@ jobs:
           IMAGE_UPLOAD=false bash "$GITHUB_WORKSPACE/scripts/image-step.sh" publish
           grep -q '^IMAGE_URL=https://raw.githubusercontent.com/mafhper/demo/v1.2.0/img/releases/release-v1.2.0-new.webp$' "$GITHUB_ENV"
           # o corpo respeita IMAGE_URL
-          set -a; . "$GITHUB_ENV"; set +a
+          while IFS='=' read -r key value; do export "$key=$value"; done < "$GITHUB_ENV"
           export RELEASE_TITLE='Demo' NOTES_GRANULARITY=minor NOTES_DIR=.github/release-notes RELEASE_LANGUAGE=pt-BR
           cd "$tmp"
           bash "$TOOLS_DIR/scripts/release-body.sh" "$tmp/body.md" >/dev/null
