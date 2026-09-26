@@ -37,6 +37,7 @@ jobs:
       is_prerelease: ${{ steps.versions.outputs.is_prerelease }}
       release_id: ${{ steps.release.outputs.release_id }}
       build_enabled: ${{ steps.report.outputs.build_enabled }}
+      contract_digest: ${{ steps.contract.outputs.digest }}
     steps:
       - name: Checkout do projeto consumidor (histórico completo)
         uses: actions/checkout@11bd71901bbe5b1630ceea73d27597364c9af683 # v4.2.2
@@ -66,6 +67,15 @@ jobs:
 
       - name: Exportar configuração do projeto
         run: node "$RUNNER_TEMP/.release-tools/scripts/release-config.mjs" "${{ inputs.config-file }}" --env >> "$GITHUB_ENV"
+
+      - name: Registrar o contrato desta execução
+        id: contract
+        env:
+          CONFIG_FILE: ${{ inputs.config-file }}
+          TOOLS_DIR: ${{ runner.temp }}/.release-tools
+        run: |
+          digest="$(bash "$TOOLS_DIR/scripts/contract-digest.sh")"
+          echo "digest=$digest" >> "$GITHUB_OUTPUT"
 
       - name: Validar coerência da configuração
         run: |
@@ -209,6 +219,13 @@ jobs:
 
       - name: Exportar configuração do projeto
         run: node "$RUNNER_TEMP/.release-tools/scripts/release-config.mjs" "${{ inputs.config-file }}" --env >> "$GITHUB_ENV"
+
+      - name: Conferir o contrato contra o prepare
+        env:
+          CONFIG_FILE: ${{ inputs.config-file }}
+          TOOLS_DIR: ${{ runner.temp }}/.release-tools
+          EXPECTED_DIGEST: ${{ needs.prepare.outputs.contract_digest }}
+        run: bash "${{ runner.temp }}/.release-tools/scripts/check-contract.sh" "$EXPECTED_DIGEST"
 
       - name: Instalar dependências de sistema
         if: env.APT_DEPS != '[]' && runner.os == 'Linux'
@@ -413,6 +430,13 @@ jobs:
 
       - name: Exportar configuração do projeto
         run: node "$RUNNER_TEMP/.release-tools/scripts/release-config.mjs" "${{ inputs.config-file }}" --env >> "$GITHUB_ENV"
+
+      - name: Conferir o contrato contra o prepare
+        env:
+          CONFIG_FILE: ${{ inputs.config-file }}
+          TOOLS_DIR: ${{ runner.temp }}/.release-tools
+          EXPECTED_DIGEST: ${{ needs.prepare.outputs.contract_digest }}
+        run: bash "${{ runner.temp }}/.release-tools/scripts/check-contract.sh" "$EXPECTED_DIGEST"
 
       - name: Publicar a arte de release
         env:
