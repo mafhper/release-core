@@ -129,6 +129,23 @@ jobs:
           : > "$GH_STUB_UPLOADS"
           run >/dev/null
           grep -q 'release-v1.2.0.webp' "$GH_STUB_UPLOADS"
+          # regressao: o corpo montado no step SEGUINTE usa o asset. O
+          # $GITHUB_ENV so vale para o step seguinte, entao os dois scripts
+          # nao podem roda no mesmo step: sem isso o corpo cairia no fallback
+          # legado e serviria a arte antiga da tag em vez da correcao.
+          mkdir -p "$tmp/.github/release-notes"
+          printf 'Nota da linha 1.2.' > "$tmp/.github/release-notes/v1.2.md"
+          export RELEASE_TITLE='Demo' NOTES_GRANULARITY=minor NOTES_DIR=.github/release-notes RELEASE_LANGUAGE=pt-BR
+          export IMAGE_PATH=img/releases/release.webp
+          export IMAGE_DIR=img/releases IMAGE_PREFIX=release IMAGE_EXT=.webp IMAGE_CORRECTION_SUFFIX=-new
+          export IMAGE_ALLOW_CORRECTION=true IMAGE_UPLOAD=true
+          : > "$GITHUB_ENV"
+          bash "$GITHUB_WORKSPACE/scripts/image-step.sh" publish >/dev/null
+          # simula o runner: o GITHUB_ENV vira variavel de ambiente no step seguinte
+          while IFS='=' read -r key value; do export "$key=$value"; done < "$GITHUB_ENV"
+          cd "$tmp"
+          bash "$GITHUB_WORKSPACE/scripts/release-body.sh" "$tmp/body.md" >/dev/null
+          grep -q '!\[Demo\](https://github.com/mafhper/demo/releases/download/v1.2.0/release-v1.2.0.webp)' "$tmp/body.md"
           # asset antigo sem digest: compara por tamanho
           printf '[{"tag_name":"v1.2.0","draft":false,"assets":[{"name":"release-v1.2.0.webp","size":%s}]}]' "$size" > "$GH_STUB_RELEASES"
           : > "$GH_STUB_UPLOADS"

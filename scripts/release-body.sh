@@ -13,16 +13,16 @@ trap 'rm -rf "$tmp_dir"' EXIT
 
 out=""
 
-# Imagem. IMAGE_URL vem do image-step.sh (asset da release, ou URL raw da tag
-# quando não há upload); sem ele, cai no caminho legado, que é a URL raw da tag
-# a partir de IMAGE_PATH.
+# Imagem. IMAGE_URL vem do image-step.sh, no step anterior (asset da release, ou
+# URL raw da tag quando não há upload); sem ela, cai no caminho legado, que é a
+# URL raw da tag a partir de IMAGE_PATH.
 if [ -n "${IMAGE_URL:-}" ]; then
   printf -v out '%s![%s](%s)\n' "$out" "$RELEASE_TITLE" "$IMAGE_URL"
 elif [ -n "${IMAGE_PATH:-}" ] && [ -f "$IMAGE_PATH" ]; then
   image_url="https://raw.githubusercontent.com/$REPO/$TAG/$IMAGE_PATH"
   printf -v out '%s![%s](%s)\n' "$out" "$RELEASE_TITLE" "$image_url"
 elif [ "${IMAGE_REQUIRED:-true}" = "true" ]; then
-  echo "ERRO: imagem de release ($IMAGE_PATH) não existe no disco." >&2
+  echo "ERRO: imagem de release não resolvida (${IMAGE_PATH:-sem IMAGE_PATH})." >&2
   exit 1
 fi
 
