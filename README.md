@@ -1,5 +1,3 @@
-# Release Core
-
 <p align="center">
   <img src="docs/images/assets/banner.webp" alt="Release Core" width="100%">
 </p>
