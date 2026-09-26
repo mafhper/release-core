@@ -85,10 +85,19 @@ echo "Arte de release: $IMAGE_RESOLVED_NAME (origem: $IMAGE_SOURCE)"
 
 [ "$mode" = "publish" ] || exit 0
 
+# IMAGE_URL vai para o $GITHUB_ENV porque o corpo é montado no step SEGUINTE
+# (o $GITHUB_ENV só vale para steps seguintes, e um export daqui não voltaria
+# para o shell que chama este script). Por isso image-step.sh e release-body.sh
+# não podem roda no mesmo step: o corpo cairia no fallback legado e serviria a
+# arte antiga da tag em vez do asset.
+set_image_url() {
+  echo "IMAGE_URL=$1" >> "$GITHUB_ENV"
+}
+
 if [ "$IMAGE_UPLOAD" != "true" ]; then
   # Sem asset, só dá para servir o que está na própria tag.
   if [ "$IMAGE_SOURCE" = "tag" ]; then
-    echo "IMAGE_URL=https://raw.githubusercontent.com/$REPO/$TAG/$IMAGE_RESOLVED_REL" >> "$GITHUB_ENV"
+    set_image_url "https://raw.githubusercontent.com/$REPO/$TAG/$IMAGE_RESOLVED_REL"
   fi
   exit 0
 fi
@@ -151,7 +160,7 @@ same_artifact() {
 
 if same_artifact; then
   echo "A arte já está publicada com o mesmo conteúdo ($IMAGE_ASSET_NAME); nada a reenviar."
-  echo "IMAGE_URL=$asset_url" >> "$GITHUB_ENV"
+  set_image_url "$asset_url"
   exit 0
 fi
 
@@ -178,5 +187,5 @@ done
 
 # URL do asset: própria da release e reenviável com --clobber, que é o caminho
 # de correção depois da tag.
-echo "IMAGE_URL=$asset_url" >> "$GITHUB_ENV"
+set_image_url "$asset_url"
 echo "Arte publicada como asset: $IMAGE_ASSET_NAME"

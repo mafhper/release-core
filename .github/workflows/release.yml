@@ -417,15 +417,16 @@ jobs:
       - name: Exportar configuração do projeto
         run: node "$RUNNER_TEMP/.release-tools/scripts/release-config.mjs" "${{ inputs.config-file }}" --env >> "$GITHUB_ENV"
 
-      - name: Publicar a arte de release e montar o corpo
+      - name: Publicar a arte de release
         env:
           DEFAULT_BRANCH: ${{ github.event.repository.default_branch }}
           CONFIG_FILE: ${{ inputs.config-file }}
           TOOLS_DIR: ${{ runner.temp }}/.release-tools
           PROJECT_ROOT: ${{ github.workspace }}
-        run: |
-          bash "${{ runner.temp }}/.release-tools/scripts/image-step.sh" publish
-          bash "${{ runner.temp }}/.release-tools/scripts/release-body.sh" "$RUNNER_TEMP/release-body.md"
+        run: bash "${{ runner.temp }}/.release-tools/scripts/image-step.sh" publish
+
+      - name: Montar o corpo do release
+        run: bash "${{ runner.temp }}/.release-tools/scripts/release-body.sh" "$RUNNER_TEMP/release-body.md"
 
       - name: Publicar o release
         run: |
