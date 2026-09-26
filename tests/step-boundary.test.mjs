@@ -90,10 +90,12 @@ function makeConsumer({ correctionInCheckout = true } = {}) {
   mkdirSync(stubDir, { recursive: true });
 
   // A tag carrega a arte antiga; a correção é o arquivo -new. É o par que faz a
-  // diferença entre "serve a arte antiga" e "serve a arte nova".
+  // diferença entre "serve a arte antiga" e "serve a arte nova". O release.webp
+  // legado também existe, como em um projeto que só tem a imagem única.
   const tagArt = join(artDir, 'release-v1.2.0.webp');
   const correctionArt = join(artDir, 'release-v1.2.0-new.webp');
   writeFileSync(tagArt, 'arte-da-tag');
+  writeFileSync(join(artDir, 'release.webp'), 'arte-legada');
   if (correctionInCheckout) writeFileSync(correctionArt, 'arte-corrigida');
   // O branch padrão tem a correção mesmo quando a tag não tem: é esse o arquivo
   // que o stub serve.
@@ -128,6 +130,7 @@ function makeConsumer({ correctionInCheckout = true } = {}) {
       TOOLS_DIR: ROOT,
       CONFIG_FILE: join(dir, '.github', 'release.config.json'),
       GITHUB_ENV: join(runnerTemp, 'github-env'),
+      IMAGE_PATH: 'img/releases/release.webp',
       IMAGE_DIR: 'img/releases',
       IMAGE_PREFIX: 'release',
       IMAGE_EXT: '.webp',
@@ -146,7 +149,10 @@ function runStep(script, env, args = []) {
   return spawnSync(BASH, [script, ...args], {
     env,
     encoding: 'utf8',
-    cwd: env.RUNNER_TEMP,
+    // O runner roda os steps com o CWD no workspace do consumidor, e é de lá
+    // que IMAGE_PATH e NOTES_DIR são relativos. Um CWD diferente mudaria o
+    // resultado sem mudar o código.
+    cwd: env.PROJECT_ROOT,
   });
 }
 
@@ -199,25 +205,54 @@ test('a URL da arte atravessa a fronteira entre steps', { skip }, () => {
     /!\[Demo\]\(https:\/\/github\.com\/mafhper\/demo\/releases\/download\/v1\.2\.0\/release-v1\.2\.0\.webp\)/,
     'o corpo deveria apontar para o asset',
   );
+  // A nota manual entra no corpo: prova de que o step rodou com o CWD no
+  // workspace, como o runner, e não em um diretório qualquer.
+  assert.match(readFileSync(bodyFile, 'utf8'), /Nota da 1\.2\.0\./);
 });
 
 test('sem a URL da arte e com upload ligado, o corpo falha em vez de servir a arte antiga', { skip }, () => {
   // O defeito da v1.2.0 como classe: com image.upload ligado e IMAGE_URL
   // ausente, o corpo não pode cair na URL raw da tag. O caminho legado é válido
   // e errado ao mesmo tempo, e é por isso que precisa ser inalcançável aqui.
+  //
+  // O que distingue este caso de "o projeto não tem imagem" é o arquivo: ele
+  // existe no disco, então o asset deveria ter sido publicado.
   const { runnerTemp, baseEnv } = makeConsumer();
   const bodyFile = join(runnerTemp, 'body.md');
 
-  // IMAGE_UPLOAD=true, sem IMAGE_URL, e com a arte antiga presente no disco.
   const body = runStep(
     RELEASE_BODY,
-    { ...baseEnv, IMAGE_PATH: 'img/releases/release-v1.2.0.webp', IMAGE_REQUIRED: 'true' },
+    { ...baseEnv, IMAGE_UPLOAD: 'true', IMAGE_REQUIRED: 'true' },
     [bodyFile],
   );
 
   assert.notEqual(body.status, 0, 'o corpo deveria falhar, não cair no fallback legado');
-  assert.match(body.stderr, /IMAGE_URL não chegou a este step/);
+  assert.match(body.stderr, /não chegou a este step/);
   assert.equal(existsSync(bodyFile), false, 'não deveria haver corpo com a URL errada');
+});
+
+test('projeto sem imagem, com required desligado, monta o corpo sem arte', { skip }, () => {
+  // O contra-teste do guard. Aqui o caminho configurado não existe no disco, o
+  // que é intencional (image.required: false): reprovar seria trocar uma
+  // release sem imagem por uma falha.
+  const { runnerTemp, baseEnv } = makeConsumer();
+  const bodyFile = join(runnerTemp, 'body.md');
+
+  const body = runStep(
+    RELEASE_BODY,
+    {
+      ...baseEnv,
+      IMAGE_UPLOAD: 'true',
+      IMAGE_PATH: 'img/releases/na-existe.webp',
+      IMAGE_REQUIRED: 'false',
+    },
+    [bodyFile],
+  );
+
+  assert.equal(body.status, 0, `não deveria falhar:\n${body.stderr}`);
+  const text = readFileSync(bodyFile, 'utf8');
+  assert.doesNotMatch(text, /!\[Demo\]/, 'não deveria haver linha de imagem');
+  assert.match(text, /^# Demo$/m, 'o resto do corpo continua igual');
 });
 
 test('os dois scripts no mesmo step não produzem uma release plausível e errada', { skip }, () => {
@@ -234,7 +269,7 @@ test('os dois scripts no mesmo step não produzem uma release plausível e errad
   const sameStep = spawnSync(BASH, ['-c', driver, 'demo', bodyFile], {
     env: { ...baseEnv },
     encoding: 'utf8',
-    cwd: runnerTemp,
+    cwd: baseEnv.PROJECT_ROOT,
   });
 
   // O primeiro script grava a URL no arquivo; o segundo, sem o apply do runner,
@@ -244,7 +279,7 @@ test('os dois scripts no mesmo step não produzem uma release plausível e errad
     0,
     'juntar os dois scripts num step só deve falhar, não publicar um corpo com a arte antiga',
   );
-  assert.match(sameStep.stderr, /IMAGE_URL não chegou a este step/);
+  assert.match(sameStep.stderr, /não chegou a este step/);
 });
 
 test('correção pós-tag com upload desligado falha, em vez de servir a arte da tag', { skip }, () => {

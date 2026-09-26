@@ -16,18 +16,25 @@ out=""
 # Imagem. IMAGE_URL vem do image-step.sh, no step anterior (asset da release, ou
 # URL raw da tag quando não há upload).
 #
-# A ordem dos ramos é uma decisão de segurança, não de conveniência: com
-# image.upload ligado, a URL do asset é a ÚNICA resposta correta, porque é a
-# única que sobrevive a uma correção pós-tag. Cair no caminho legado ali produz
-# uma release plausível e errada — foi exatamente o defeito da v1.2.0, em que o
-# asset subiu com o nome canônico e o corpo continuou exibindo a arte antiga da
-# tag. O fallback legado só é aceito quando não há upload, que é o caso em que
-# a URL raw da tag é de fato a resposta certa.
+# A ordem dos ramos é uma decisão de segurança, não de conveniência.
+#
+# Com image.upload ligado, a URL do asset é a ÚNICA resposta correta, porque é
+# a única que sobrevive a uma correção pós-tag. E ela sempre existe quando a
+# imagem existe: o image-step.sh sobe o asset justamente nesse regime. Então,
+# com upload ligado e o arquivo no disco, uma IMAGE_URL ausente só pode
+# significar que o valor não atravessou a fronteira — cair na URL raw da tag ali
+# produz uma release plausível e errada, que foi o defeito da v1.2.0: o asset
+# subiu com o nome canônico e o corpo continuou exibindo a arte antiga.
+#
+# A imagem "não existe" e a URL "não chegou" são estados diferentes, e o
+# discriminador é o arquivo: se ele não está no disco, não há imagem, e quem
+# decide é o IMAGE_REQUIRED logo abaixo. Reprovar esse caso trocaria uma
+# release legitimamente sem imagem por uma falha.
 if [ -n "${IMAGE_URL:-}" ]; then
   printf -v out '%s![%s](%s)\n' "$out" "$RELEASE_TITLE" "$IMAGE_URL"
-elif [ "${IMAGE_UPLOAD:-false}" = "true" ]; then
-  echo "ERRO: image.upload está ligado, mas IMAGE_URL não chegou a este step." >&2
-  echo "ERRO: o corpo cairia na URL raw de ${IMAGE_PATH:-o caminho legado} e exibiria a arte antiga da tag." >&2
+elif [ "${IMAGE_UPLOAD:-false}" = "true" ] && [ -n "${IMAGE_PATH:-}" ] && [ -f "$IMAGE_PATH" ]; then
+  echo "ERRO: image.upload está ligado e a imagem existe, mas IMAGE_URL não chegou a este step." >&2
+  echo "ERRO: o corpo cairia na URL raw de $IMAGE_PATH e exibiria a arte antiga da tag, não o asset." >&2
   echo "ERRO: IMAGE_URL é escrito pelo image-step.sh no ${GITHUB_ENV:-GITHUB_ENV}, que o GitHub só aplica a steps seguintes." >&2
   echo "ERRO: 'Publicar a arte de release' e 'Montar o corpo do release' precisam ser steps separados." >&2
   exit 1
