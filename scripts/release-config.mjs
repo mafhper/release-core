@@ -1,6 +1,13 @@
 #!/usr/bin/env node
 import { readFileSync } from "node:fs";
-import { dirname, resolve } from "node:path";
+import { dirname, posix as posixPath, resolve } from "node:path";
+import { fileURLToPath, pathToFileURL } from "node:url";
+
+// Caminhos do config são sempre POSIX (o contrato é o mesmo nos três sistemas),
+// então a manipulação de diretório/nome de arquivo da arte não pode depender de
+// node:path da plataforma.
+const posixDirname = (p) => posixPath.dirname(p.replace(/\\/g, "/"));
+const posixBasename = (p) => posixPath.basename(p.replace(/\\/g, "/"));
 
 const VALID_LANGUAGES = new Set(["en", "pt-BR"]);
 const VALID_PACKAGE_MANAGERS = new Set(["bun", "npm"]);
@@ -141,6 +148,50 @@ function load(configPath) {
     );
   }
 
+  // A arte pode ser resolvida por versão (docs/archetypes). `path` aceita
+  // arquivo (legado) ou diretório: com arquivo, o diretório, o prefixo e a
+  // extensão vêm do próprio nome, então consumidores existentes passam a ter
+  // resolução por tag sem mudar nada no config.
+  const imageLooksLikeFile = /\.[A-Za-z0-9]+$/.test(imagePath);
+  let imageDir;
+  let imagePrefix;
+  let imageExt;
+  if (imageLooksLikeFile) {
+    imageDir = posixDirname(imagePath);
+    const base = posixBasename(imagePath);
+    const dot = base.lastIndexOf(".");
+    imagePrefix = dot > 0 ? base.slice(0, dot) : base;
+    imageExt = dot > 0 ? base.slice(dot).toLowerCase() : "";
+  } else {
+    imageDir = imagePath.replace(/[/\\]+$/, "");
+    imagePrefix = image.prefix ?? "release";
+    imageExt = image.ext ?? ".webp";
+  }
+  if (imageDir.trim() === "") {
+    fail("release.image.path não pode ser um caminho vazio.");
+  }
+  if (typeof imagePrefix !== "string" || imagePrefix.trim() === "") {
+    fail('release.image.prefix deve ser um nome de arquivo sem extensão (string não vazia).');
+  }
+  if (typeof imageExt !== "string" || !/^\.[A-Za-z0-9]+$/.test(imageExt)) {
+    fail(`release.image.ext deve ser uma extensão com ponto (ex.: ".webp"); recebido: "${imageExt}".`);
+  }
+  // Publicar a arte como asset da release é o que permite corrigir a imagem
+  // depois da tag: o corpo passa a apontar /releases/download/<tag>/<arquivo>,
+  // que pode ser reenviado sem mover a tag.
+  const imageUpload = image.upload ?? true;
+  if (typeof imageUpload !== "boolean") {
+    fail("release.image.upload deve ser booleano.");
+  }
+  const imageAllowCorrection = image.allow_correction ?? true;
+  if (typeof imageAllowCorrection !== "boolean") {
+    fail("release.image.allow_correction deve ser booleano.");
+  }
+  const imageCorrectionSuffix = image.correction_suffix ?? "-new";
+  if (typeof imageCorrectionSuffix !== "string" || imageCorrectionSuffix.trim() === "") {
+    fail("release.image.correction_suffix deve ser um sufixo (string não vazia).");
+  }
+
   const sections = release.sections ?? {};
 
   const build = config.build ?? {};
@@ -250,6 +301,12 @@ function load(configPath) {
       imagePath,
       imageRequired,
       imageGranularity,
+      imageDir,
+      imagePrefix,
+      imageExt,
+      imageUpload,
+      imageAllowCorrection,
+      imageCorrectionSuffix,
       usage: sections.usage ?? "",
       extra: sections.extra ?? "",
     },
@@ -291,6 +348,12 @@ function getKey(cfg, key) {
     image_path: cfg.release.imagePath,
     image_required: cfg.release.imageRequired,
     image_granularity: cfg.release.imageGranularity,
+    image_dir: cfg.release.imageDir,
+    image_prefix: cfg.release.imagePrefix,
+    image_ext: cfg.release.imageExt,
+    image_upload: cfg.release.imageUpload,
+    image_allow_correction: cfg.release.imageAllowCorrection,
+    image_correction_suffix: cfg.release.imageCorrectionSuffix,
     section_usage: cfg.release.usage,
     section_extra: cfg.release.extra,
     package_manager: cfg.build.packageManager,
@@ -336,6 +399,12 @@ function printEnv(cfg) {
   emitEnvLine(lines, "IMAGE_PATH", cfg.release.imagePath);
   emitEnvLine(lines, "IMAGE_REQUIRED", String(cfg.release.imageRequired));
   emitEnvLine(lines, "IMAGE_GRANULARITY", cfg.release.imageGranularity);
+  emitEnvLine(lines, "IMAGE_DIR", cfg.release.imageDir);
+  emitEnvLine(lines, "IMAGE_PREFIX", cfg.release.imagePrefix);
+  emitEnvLine(lines, "IMAGE_EXT", cfg.release.imageExt);
+  emitEnvLine(lines, "IMAGE_UPLOAD", String(cfg.release.imageUpload));
+  emitEnvLine(lines, "IMAGE_ALLOW_CORRECTION", String(cfg.release.imageAllowCorrection));
+  emitEnvLine(lines, "IMAGE_CORRECTION_SUFFIX", cfg.release.imageCorrectionSuffix);
   emitEnvLine(lines, "PKG_MANAGER", cfg.build.packageManager);
   emitEnvLine(lines, "NODE_VERSION", cfg.build.node);
   emitEnvLine(lines, "BUN_VERSION", cfg.build.bun);
@@ -359,23 +428,30 @@ function printEnv(cfg) {
   process.stdout.write(`${lines.join("\n")}\n`);
 }
 
-const [, , configPath, mode, key] = process.argv;
+const isMain =
+  process.argv[1] && import.meta.url === pathToFileURL(process.argv[1]).href;
 
-if (!configPath) {
-  console.error("Uso: release-config.mjs <arquivo> [--env | --get <chave>]");
-  process.exit(1);
-}
+if (isMain) {
+  const [, , configPath, mode, key] = process.argv;
 
-const cfg = load(configPath);
-
-if (mode === "--get") {
-  if (!key) {
-    console.error("--get exige uma chave.");
+  if (!configPath) {
+    console.error("Uso: release-config.mjs <arquivo> [--env | --get <chave>]");
     process.exit(1);
   }
-  process.stdout.write(`${getKey(cfg, key)}\n`);
-} else if (mode === "--env") {
-  printEnv(cfg);
-} else {
-  process.stdout.write(`${JSON.stringify(cfg, null, 2)}\n`);
+
+  const cfg = load(configPath);
+
+  if (mode === "--get") {
+    if (!key) {
+      console.error("--get exige uma chave.");
+      process.exit(1);
+    }
+    process.stdout.write(`${getKey(cfg, key)}\n`);
+  } else if (mode === "--env") {
+    printEnv(cfg);
+  } else {
+    process.stdout.write(`${JSON.stringify(cfg, null, 2)}\n`);
+  }
 }
+
+export { load };

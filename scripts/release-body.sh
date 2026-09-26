@@ -13,8 +13,12 @@ trap 'rm -rf "$tmp_dir"' EXIT
 
 out=""
 
-# Imagem (URL fixada na tag, nunca em main)
-if [ -n "${IMAGE_PATH:-}" ] && [ -f "$IMAGE_PATH" ]; then
+# Imagem. IMAGE_URL vem do image-step.sh (asset da release, ou URL raw da tag
+# quando não há upload); sem ele, cai no caminho legado, que é a URL raw da tag
+# a partir de IMAGE_PATH.
+if [ -n "${IMAGE_URL:-}" ]; then
+  printf -v out '%s![%s](%s)\n' "$out" "$RELEASE_TITLE" "$IMAGE_URL"
+elif [ -n "${IMAGE_PATH:-}" ] && [ -f "$IMAGE_PATH" ]; then
   image_url="https://raw.githubusercontent.com/$REPO/$TAG/$IMAGE_PATH"
   printf -v out '%s![%s](%s)\n' "$out" "$RELEASE_TITLE" "$image_url"
 elif [ "${IMAGE_REQUIRED:-true}" = "true" ]; then

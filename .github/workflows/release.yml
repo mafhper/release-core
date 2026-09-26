@@ -116,13 +116,24 @@ jobs:
             echo "prev_tag=$prev_tag"
           } >> "$GITHUB_OUTPUT"
 
+      - name: Resolver a arte de release
+        env:
+          DEFAULT_BRANCH: ${{ github.event.repository.default_branch }}
+          CONFIG_FILE: ${{ inputs.config-file }}
+          TOOLS_DIR: ${{ runner.temp }}/.release-tools
+          PROJECT_ROOT: ${{ github.workspace }}
+        run: bash "${{ runner.temp }}/.release-tools/scripts/image-step.sh" resolve
+
       - name: Validar política da imagem de release
         run: |
-          if [ "$IMAGE_REQUIRED" = "true" ] && [ ! -f "$IMAGE_PATH" ]; then
-            echo "::error::Imagem de release obrigatória não existe no disco: $IMAGE_PATH"; exit 1
+          if [ "$IMAGE_REQUIRED" = "true" ] && [ -z "$IMAGE_RESOLVED_PATH" ]; then
+            echo "::error::Nenhuma arte de release encontrada para ${{ steps.tag.outputs.tag }} em $IMAGE_DIR."; exit 1
           fi
           prev_tag="${{ steps.versions.outputs.prev_tag }}"
-          if [ -n "$prev_tag" ]; then
+          # O gate de "precisa mudar" vale para a arte que está na tag. Arte vinda
+          # do branch padrão (correção, com ou sem o sufixo -new) não participa do
+          # diff entre tags, porque aquele commit não a contém.
+          if [ -n "$prev_tag" ] && [ "$IMAGE_SOURCE" = "tag" ] && [ -n "$IMAGE_RESOLVED_PATH" ]; then
             need_change=0
             case "$IMAGE_GRANULARITY" in
               tag) need_change=1 ;;
@@ -132,8 +143,8 @@ jobs:
                 if [ "$cur_line" != "$prev_line" ]; then need_change=1; fi
                 ;;
             esac
-            if [ "$need_change" = "1" ] && ! git diff --name-only "$prev_tag".."$GITHUB_SHA" -- "$IMAGE_PATH" | grep -q .; then
-              echo "::error::A imagem de release precisa mudar entre $prev_tag e ${{ steps.tag.outputs.tag }} (granularidade $IMAGE_GRANULARITY)."; exit 1
+            if [ "$need_change" = "1" ] && ! git diff --name-only "$prev_tag".."$GITHUB_SHA" -- "$IMAGE_RESOLVED_REL" | grep -q .; then
+              echo "::error::A imagem de release precisa mudar entre $prev_tag e ${{ steps.tag.outputs.tag }} (granularidade $IMAGE_GRANULARITY, arte $IMAGE_RESOLVED_REL)."; exit 1
             fi
           fi
 
@@ -406,10 +417,15 @@ jobs:
       - name: Exportar configuração do projeto
         run: node "$RUNNER_TEMP/.release-tools/scripts/release-config.mjs" "${{ inputs.config-file }}" --env >> "$GITHUB_ENV"
 
-      - name: Montar corpo do release
-        id: body
+      - name: Publicar a arte de release e montar o corpo
+        env:
+          DEFAULT_BRANCH: ${{ github.event.repository.default_branch }}
+          CONFIG_FILE: ${{ inputs.config-file }}
+          TOOLS_DIR: ${{ runner.temp }}/.release-tools
+          PROJECT_ROOT: ${{ github.workspace }}
         run: |
-          bash "$RUNNER_TEMP/.release-tools/scripts/release-body.sh" "$RUNNER_TEMP/release-body.md"
+          bash "${{ runner.temp }}/.release-tools/scripts/image-step.sh" publish
+          bash "${{ runner.temp }}/.release-tools/scripts/release-body.sh" "$RUNNER_TEMP/release-body.md"
 
       - name: Publicar o release
         run: |
