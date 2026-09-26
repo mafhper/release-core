@@ -23,7 +23,7 @@ Cada projeto do portfólio pode implementar seu próprio workflow de release: va
 - **Instalação desacoplada do desktop** — dependências são instaladas sempre que `package_manager` é declarado, inclusive com `desktop.enabled: true` (o `beforeBuildCommand` do Tauri depende do workspace). A instalação usa `build.working_directory` (default `.`), separado do `desktop.project_path` entregue ao `tauri-action`.
 - **Build declarativo** — toolchain (node/bun/rust/apt), gates, pre-build e comando de build vêm do contrato; o Core não assume framework nem gerente de pacotes.
 - **Artefatos 0..N** — existência, validação executável, rename opcional e upload idempotente (`--clobber`).
-- **Política de imagem como hard gate** — `docs/images/releases/release.webp` representa a linha `major.minor`; nova linha exige mudança da imagem entre tags.
+- **Política de imagem como hard gate** — a arte é por versão: `release-vX.Y.Z.webp`, com fallback para a linha do minor e para o arquivo legado. Nova linha exige arte nova entre tags. Para corrigir a arte depois da tag, comite `<arquivo>-new.webp` no branch padrão e re-rode o workflow: ela sobe como asset e o corpo passa a apontar para ele, sem mover a tag.
 - **Release idempotente** — rascunho → publicação, com retry; rerun seguro, nunca um `create` cego.
 - **Prerelease automático** — detectado pelo semver da tag (`v1.2.0-beta.1`), sem configuração.
 - **Permissões mínimas** — o Core mantém `contents: write` como teto e nunca eleva o token do caller.
@@ -55,7 +55,7 @@ jobs:
 
 **2. Declare as diferenças** em `.github/release.config.json` — [contrato completo](docs/config-schema.md).
 
-**3. Forneça os insumos** — a imagem em `docs/images/releases/release.webp` e as notas editoriais em `.github/release-notes/` (granularidade declarada no contrato).
+**3. Forneça os insumos** — a arte em `docs/images/releases/release-vX.Y.Z.webp` (o `release.webp` único continua aceito como último recurso) e as notas editoriais em `.github/release-notes/` (granularidade declarada no contrato).
 
 ## Tipos de projeto suportados
 
