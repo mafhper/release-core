@@ -98,8 +98,16 @@ if [ "$IMAGE_UPLOAD" != "true" ]; then
   # Sem asset, só dá para servir o que está na própria tag.
   if [ "$IMAGE_SOURCE" = "tag" ]; then
     set_image_url "https://raw.githubusercontent.com/$REPO/$TAG/$IMAGE_RESOLVED_REL"
+    exit 0
   fi
-  exit 0
+  # A arte veio do branch padrão (correção pós-tag) e não há upload: não existe
+  # URL estável para ela. A URL raw do branch mudaria de conteúdo a cada
+  # commit, o que a ADR-001 proíbe; servir a da tag mostraria a arte antiga sem
+  # avisar. Falhar é a única saída honesta.
+  echo "::error::A arte de release veio do branch padrão ($IMAGE_RESOLVED_NAME) e image.upload está desligado."
+  echo "::error::Sem upload não há onde hospedar a correção: a URL raw do branch padrão não é estável e a da tag é a arte antiga."
+  echo "::error::Ligie image.upload no release.config.json, ou remova a arte de correção do branch padrão."
+  exit 1
 fi
 
 # O caminho vem do resolver, que já o resolveu: reconstruir aqui por nome

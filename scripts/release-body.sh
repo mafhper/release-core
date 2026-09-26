@@ -14,10 +14,23 @@ trap 'rm -rf "$tmp_dir"' EXIT
 out=""
 
 # Imagem. IMAGE_URL vem do image-step.sh, no step anterior (asset da release, ou
-# URL raw da tag quando não há upload); sem ela, cai no caminho legado, que é a
-# URL raw da tag a partir de IMAGE_PATH.
+# URL raw da tag quando não há upload).
+#
+# A ordem dos ramos é uma decisão de segurança, não de conveniência: com
+# image.upload ligado, a URL do asset é a ÚNICA resposta correta, porque é a
+# única que sobrevive a uma correção pós-tag. Cair no caminho legado ali produz
+# uma release plausível e errada — foi exatamente o defeito da v1.2.0, em que o
+# asset subiu com o nome canônico e o corpo continuou exibindo a arte antiga da
+# tag. O fallback legado só é aceito quando não há upload, que é o caso em que
+# a URL raw da tag é de fato a resposta certa.
 if [ -n "${IMAGE_URL:-}" ]; then
   printf -v out '%s![%s](%s)\n' "$out" "$RELEASE_TITLE" "$IMAGE_URL"
+elif [ "${IMAGE_UPLOAD:-false}" = "true" ]; then
+  echo "ERRO: image.upload está ligado, mas IMAGE_URL não chegou a este step." >&2
+  echo "ERRO: o corpo cairia na URL raw de ${IMAGE_PATH:-o caminho legado} e exibiria a arte antiga da tag." >&2
+  echo "ERRO: IMAGE_URL é escrito pelo image-step.sh no ${GITHUB_ENV:-GITHUB_ENV}, que o GitHub só aplica a steps seguintes." >&2
+  echo "ERRO: 'Publicar a arte de release' e 'Montar o corpo do release' precisam ser steps separados." >&2
+  exit 1
 elif [ -n "${IMAGE_PATH:-}" ] && [ -f "$IMAGE_PATH" ]; then
   image_url="https://raw.githubusercontent.com/$REPO/$TAG/$IMAGE_PATH"
   printf -v out '%s![%s](%s)\n' "$out" "$RELEASE_TITLE" "$image_url"
