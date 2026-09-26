@@ -9,9 +9,14 @@ O contrato é pequeno, declarativo e validado pelo helper `scripts/release-confi
     "tagline": "Descrição curta.",          // opcional
     "language": "pt-BR",                    // "pt-BR" | "en"
     "image": {
-      "path": "docs/images/releases/release.webp",
+      "path": "docs/images/releases/release.webp", // arquivo (legado) ou diretório
       "required": true,
-      "granularity": "minor"               // "minor" | "tag"
+      "granularity": "minor",              // "minor" | "tag"
+      "prefix": "release",                 // opcional: só com path = diretório
+      "ext": ".webp",                      // opcional: só com path = diretório
+      "upload": true,                      // opcional: anexa a arte como asset da release
+      "allow_correction": true,            // opcional: aceita <arquivo>-new do branch padrão
+      "correction_suffix": "-new"          // opcional
     },
     "notes": { "granularity": "tag" },     // "tag" | "minor"
     "sections": {
@@ -59,6 +64,11 @@ O contrato é pequeno, declarativo e validado pelo helper `scripts/release-confi
 | `release.image.path` | `docs/images/releases/release.webp` |
 | `release.image.required` | `true` |
 | `release.image.granularity` | `minor` |
+| `release.image.prefix` | `release` (só quando `path` é diretório) |
+| `release.image.ext` | `.webp` (só quando `path` é diretório) |
+| `release.image.upload` | `true` |
+| `release.image.allow_correction` | `true` |
+| `release.image.correction_suffix` | `-new` |
 | `release.notes.granularity` | `tag` |
 | `build.node` | `22` se `package_manager` for `npm`; senão vazio |
 | `build.working_directory` | `.` (raiz do repositório) |
@@ -70,6 +80,8 @@ O contrato é pequeno, declarativo e validado pelo helper `scripts/release-confi
 
 - `release.title` é obrigatório (não vazio).
 - `language`, `notes.granularity`, `image.granularity` são enums.
+- `image.path` é um arquivo (formato legado) ou um diretório; com diretório, `image.ext` precisa começar com ponto.
+- `image.upload`, `image.allow_correction` são booleanos; `image.correction_suffix` é string não vazia.
 - `package_manager` exige evidência: `bun` → `bun.lock`/`bun.lockb`; `npm` → `package-lock.json`. O valor de `package.json#packageManager` deve ser coerente.
 - `bun` declarado exige `package_manager: "bun"`; `npm` exige `node` com versão.
 - `build.working_directory` deve ser um caminho relativo à raiz do repositório.
@@ -92,12 +104,52 @@ Tags `vX.Y.Z-<sufixo>` (ex.: `v1.2.0-beta.1`) são detectadas automaticamente e 
 
 ## Imagem
 
-A imagem representa a linha `major.minor`:
+A imagem é **por versão**, com fallback para a linha do minor e para o arquivo
+legado. O Core procura, para a tag alvo, nesta ordem:
+
+| Ordem | Arquivo (com `prefix: "release"`, `ext: ".webp"`) | Origem |
+|---|---|---|
+| 1º | `docs/images/releases/release-v1.2.0-new.webp` | branch padrão (correção) ou a própria tag |
+| 2º | `docs/images/releases/release-v1.2.0.webp` | a tag |
+| 3º | `docs/images/releases/release-v1.2-new.webp` | branch padrão (correção) |
+| 4º | `docs/images/releases/release-v1.2.webp` | a tag |
+| 5º | `docs/images/releases/release.webp` | a tag (legado) |
+
+Assim a arte da v1.2.0 continua existindo quando a v1.3.0 é publicada, e o
+granularidade continua valendo:
 
 ```
 v1.0.0 → obrigatória (primeira)
-v1.0.1 → pode reutilizar
+v1.0.1 → pode reutilizar a linha v1.0
 v1.1.0 → deve mudar (hard gate)
 ```
 
-Com `granularity: "tag"`, a mudança é exigida a cada versão. O Core compara a imagem atual com a da `prev_tag` (maior semver < atual), nunca com release histórica qualquer.
+Com `granularity: "tag"`, a mudança é exigida a cada versão. O Core compara a
+arte resolvida com a da `prev_tag` (maior semver < atual), nunca com release
+histórica qualquer. Uma correção (`-new`) não passa por esse gate: ela não
+está no histórico entre as duas tags.
+
+### `image.path`: arquivo (legado) ou diretório
+
+`path` aceita as duas formas, e o formato antigo continua valendo sem
+mudança de comportamento:
+
+- **arquivo** (`docs/images/releases/release.webp`): o diretório, o prefixo e a
+  extensão vêm do próprio nome. É o formato atual dos consumidores, que já
+  passam a ter resolução por tag sem editar nada.
+- **diretório** (`docs/images/releases`): usa `image.prefix` (default
+  `release`) e `image.ext` (default `.webp`).
+
+### Asset e correção depois da tag
+
+Com `image.upload` (default `true`), a arte resolvida é anexada como **asset da
+própria release** e o corpo passa a apontar
+`https://github.com/<repo>/releases/download/<tag>/<arquivo>`. Isso é o que
+permite corrigir a arte depois: corrige-se o arquivo, reenvia-se o asset com
+`gh release upload --clobber` e re-roda-se o workflow da tag — **sem mover a
+tag** e sem perder os artefatos já publicados.
+
+O arquivo de correção (`-new`) é lido do **branch padrão**, porque o checkout
+do workflow está na tag e não o contém. Com `image.upload: false`, a correção
+volta a não ser servível (não há URL estável fora da tag) e o corpo usa a URL
+raw da tag.

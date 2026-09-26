@@ -35,11 +35,11 @@ jobs:
           node scripts/release-config.mjs .github/release.config.json >/dev/null
           node scripts/release-config.mjs .github/release.config.json --get node
 
-      - name: Shellcheck do release-body.sh
+      - name: Shellcheck dos scripts de release
         run: |
           sudo apt-get update
           sudo apt-get install -y shellcheck
-          shellcheck scripts/release-body.sh
+          shellcheck scripts/release-body.sh scripts/image-step.sh
 
       - name: Smoke test do release-body.sh
         run: |
@@ -54,6 +54,35 @@ jobs:
           grep -q 'raw.githubusercontent.com/mafhper/demo/v1.0.0/img/releases/release.webp' "$tmp/body.md"
           grep -q 'Nota da linha 1.0.' "$tmp/body.md"
           grep -q '^# Demo' "$tmp/body.md"
+
+      - name: Smoke test da arte por versão e da correção
+        run: |
+          tmp="$(mktemp -d)"
+          mkdir -p "$tmp/img/releases" "$tmp/.github/release-notes" "$tmp/correction/img/releases" "$tmp/rt"
+          printf 'arte-da-tag' > "$tmp/img/releases/release-v1.2.0.webp"
+          printf 'arte-corrigida' > "$tmp/img/releases/release-v1.2.0-new.webp"
+          printf 'Nota da linha 1.2.' > "$tmp/.github/release-notes/v1.2.md"
+          printf '{"release":{"title":"Demo","notes":{"granularity":"minor"},"image":{"path":"img/releases/release.webp"}}}' > "$tmp/.github/release.config.json"
+          set -e
+          # reproduz o fluxo: TOOLS_DIR e o core, PROJECT_ROOT e o consumidor
+          export REPO=mafhper/demo TAG=v1.2.0 PROJECT_ROOT="$tmp" RUNNER_TEMP="$tmp/rt"
+          export GITHUB_ENV="$tmp/env" TOOLS_DIR="$GITHUB_WORKSPACE" CONFIG_FILE="$tmp/.github/release.config.json"
+          export IMAGE_DIR=img/releases IMAGE_PREFIX=release IMAGE_EXT=.webp IMAGE_CORRECTION_SUFFIX=-new
+          export IMAGE_ALLOW_CORRECTION=true IMAGE_UPLOAD=true
+          : > "$GITHUB_ENV"
+          # sem DEFAULT_BRANCH nao ha download; o -new do proprio checkout vence
+          bash "$GITHUB_WORKSPACE/scripts/image-step.sh" resolve
+          grep -q '^IMAGE_RESOLVED_NAME=release-v1.2.0-new.webp$' "$GITHUB_ENV"
+          grep -q '^IMAGE_IS_CORRECTION=true$' "$GITHUB_ENV"
+          # publish sem upload: cai na URL raw da tag
+          IMAGE_UPLOAD=false bash "$GITHUB_WORKSPACE/scripts/image-step.sh" publish
+          grep -q '^IMAGE_URL=https://raw.githubusercontent.com/mafhper/demo/v1.2.0/img/releases/release-v1.2.0-new.webp$' "$GITHUB_ENV"
+          # o corpo respeita IMAGE_URL
+          set -a; . "$GITHUB_ENV"; set +a
+          export RELEASE_TITLE='Demo' NOTES_GRANULARITY=minor NOTES_DIR=.github/release-notes RELEASE_LANGUAGE=pt-BR
+          cd "$tmp"
+          bash "$TOOLS_DIR/scripts/release-body.sh" "$tmp/body.md" >/dev/null
+          grep -q '!\[Demo\](https://raw.githubusercontent.com/mafhper/demo/v1.2.0/img/releases/release-v1.2.0-new.webp)' "$tmp/body.md"
 
   actionlint:
     runs-on: ubuntu-latest
