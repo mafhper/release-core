@@ -96,6 +96,52 @@ test('mudar a config muda o digest', { skip }, () => {
   assert.ok(dir);
 });
 
+test('o digest ignora a normalização de fim de linha do checkout', { skip }, () => {
+  // O bug que este teste existe para impedir. `actions/checkout` converte LF em
+  // CRLF no Windows (core.autocrlf por omissão), então os três jobs não recebem
+  // os mesmos bytes para o mesmo config. Com hash sobre os bytes crus, o job do
+  // Windows falhava com "o contrato mudou" sem haver divergência — e o tripwire
+  // deixava de distinguir mudança real de normalização, que é a única coisa que
+  // ele precisa distinguir.
+  //
+  // O mesmo TOOLS_DIR nos dois lados: o digest inclui o commit das ferramentas,
+  // então workspaces separados dariam SHAs diferentes e o teste passaria errado.
+  const body = '{\n  "release": {\n    "title": "Demo"\n  }\n}\n';
+  const { tools, config } = makeWorkspace();
+  const env = { ...process.env, CONFIG_FILE: config, TOOLS_DIR: tools };
+
+  writeFileSync(config, body);
+  const lf = digest(env);
+
+  writeFileSync(config, body.replace(/\n/g, '\r\n'));
+  const crlf = digest(env);
+
+  assert.equal(lf.status, 0, `falhou com LF:\n${lf.stderr}`);
+  assert.equal(crlf.status, 0, `falhou com CRLF:\n${crlf.stderr}`);
+  assert.equal(
+    lf.stdout,
+    crlf.stdout,
+    'o mesmo config em LF e CRLF tem que dar o mesmo digest — o checkout do Windows normaliza',
+  );
+});
+
+test('divergência real continua detectable através da normalização', { skip }, () => {
+  // A normalização não pode virar cegueira: um config que muda de verdade tem que
+  // continuar mudando o digest, mesmo que cada job o leia com finais de linha
+  // diferentes.
+  const body = '{\n  "release": {\n    "title": "Antes"\n  }\n}\n';
+  const { tools, config } = makeWorkspace();
+  const env = { ...process.env, CONFIG_FILE: config, TOOLS_DIR: tools };
+
+  writeFileSync(config, body);
+  const before = digest(env).stdout;
+
+  writeFileSync(config, body.replace('Antes', 'Depois').replace(/\n/g, '\r\n'));
+  const after = digest(env).stdout;
+
+  assert.notEqual(before, after, 'conteúdo diferente tem que dar digest diferente mesmo em CRLF');
+});
+
 test('mudar o commit das ferramentas muda o digest', { skip }, () => {
   // O caso que o prepare não veria: o build buscou as ferramentas de outra ref.
   const { tools, config } = makeWorkspace();

@@ -25,7 +25,17 @@ if [ ! -f "$CONFIG_FILE" ]; then
   exit 1
 fi
 
-config_sha="$(sha256sum "$CONFIG_FILE" | cut -d' ' -f1)"
+# Normaliza o fim de linha ANTES do hash. `actions/checkout` converte LF em CRLF
+# no Windows (core.autocrlf por omissão), e o checkout dos três jobs não produz os
+# mesmos bytes para o mesmo arquivo. Sem normalizar, o tripwire acusava divergência
+# de contrato no job do Windows que não existia — e, pior, deixava de distinguir
+# divergência real de normalização, que é o que ele existe para medir.
+#
+# `tr -d '\r'` e não `sed 's/\r$//'` por portabilidade: BSD sed (macOS) nao
+# interpreta `\r` como carriage return, e a diferenca entre as duas formas seria
+# exatamente o bug outra vez. Remover todo CR e seguro porque JSON proibe CR cru
+# dentro de string (tem de vir escapado), entao todo CR do arquivo e fim de linha.
+config_sha="$(tr -d '\r' < "$CONFIG_FILE" | sha256sum | cut -d' ' -f1)"
 # O tools dir é um git init + fetch + checkout, então HEAD é o commit do
 # action_ref. Se não for um repositório, o digest ainda é válido: o que muda é
 # apenas a segunda metade da entrada.
