@@ -46,7 +46,7 @@ concurrency:
 
 jobs:
   release:
-    uses: mafhper/release-core/.github/workflows/release.yml@v1.2.5
+    uses: mafhper/release-core/.github/workflows/release.yml@v1.3.0
     with:
       matrix: '[{"os":"ubuntu-latest"}]'
 ```
@@ -84,7 +84,7 @@ O `release.config.json` é a fonte única da verdade do runtime — toolchain, g
 
 ## Versionamento
 
-É tratado como uma API de automação. Consumidores fixam versões imutáveis (`@v1.2.5`); `@main` nunca é dependência permanente. Mudança incompatível no contrato gera `v2.0.0`. Tags publicadas não devem ser movidas.
+É tratado como uma API de automação. Consumidores fixam versões imutáveis (`@v1.3.0`); `@main` nunca é dependência permanente. Mudança incompatível no contrato gera `v2.0.0`. Tags publicadas não devem ser movidas.
 
 ## Estrutura
 
@@ -100,14 +100,27 @@ docs/
 ├── release-workflow.md
 ├── config-schema.md
 ├── archetypes/{web,extension,tauri}.md
-├── images/releases/release.webp
-└── images/logo/icon-{256,512,1024}.png
+├── images/
+│   ├── assets/{banner,hero-bg}.webp   # banner do README e fundo do painel
+│   ├── logo/logo.svg                   # o wordmark
+│   └── releases/release-vX.Y.webp      # a arte de cada linha major.minor
 scripts/
 ├── release-config.mjs
 ├── check-release-version.mjs
-└── release-body.sh
+├── prev-tag.mjs
+├── resolve-image.mjs
+├── image-policy.mjs
+├── collect-artifacts.mjs
+├── check-cell-expect.mjs
+├── verify-artifacts.mjs
+├── release-body.sh
+├── image-step.sh
+├── contract-digest.sh
+└── check-contract.sh
 tests/
-└── fixtures/{web,extension,tauri}
+├── fixtures/{web,extension,tauri}          # por arquétipo, com as entradas mínimas
+├── fixtures/projects/<consumidor>/          # os 7 release.config.json reais
+└── *.test.mjs
 ```
 
 ## Documentação
