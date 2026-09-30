@@ -86,6 +86,52 @@ jobs:
           bash "$TOOLS_DIR/scripts/release-body.sh" "$tmp/body.md" >/dev/null
           grep -q '!\[Demo\](https://raw.githubusercontent.com/mafhper/demo/v1.2.0/img/releases/release-v1.2.0-new.webp)' "$tmp/body.md"
 
+      - name: Smoke test da era de arte
+        run: |
+          tmp="$(mktemp -d)"
+          mkdir -p "$tmp/img/releases" "$tmp/rt"
+          printf 'arte-antiga' > "$tmp/img/releases/release-v1.0.webp"
+          printf 'arte-nova'   > "$tmp/img/releases/release-v1.2.3.webp"
+          # O patch seguinte (v1.2.4) recebe a era de v1.2.3, e nao a da linha.
+          cat > "$tmp/.github-release.config.json" <<'JSON'
+          {"release":{"title":"Demo","image":{"path":"img/releases","changes":[
+            {"from":"v1.0.0","file":"release-v1.0.webp"},
+            {"from":"v1.2.3","file":"release-v1.2.3.webp"}]}}}
+          JSON
+          set -e
+          export REPO=mafhper/demo TAG=v1.2.4 PROJECT_ROOT="$tmp" RUNNER_TEMP="$tmp/rt"
+          export GITHUB_ENV="$tmp/env" TOOLS_DIR="$GITHUB_WORKSPACE" CONFIG_FILE="$tmp/.github-release.config.json"
+          export IMAGE_DIR=img/releases IMAGE_PREFIX=release IMAGE_EXT=.webp IMAGE_CORRECTION_SUFFIX=-new
+          export IMAGE_ALLOW_CORRECTION=true IMAGE_UPLOAD=true
+          : > "$GITHUB_ENV"
+          bash "$GITHUB_WORKSPACE/scripts/image-step.sh" resolve
+          grep -q '^IMAGE_RESOLVED_NAME=release-v1.2.3.webp$' "$GITHUB_ENV"
+          grep -q '^IMAGE_ERA_FROM=v1.2.3$' "$GITHUB_ENV"
+          grep -q '^IMAGE_ERA_FILE=release-v1.2.3.webp$' "$GITHUB_ENV"
+          # a correcao da era vem antes da era, e o asset segue canonico
+          mkdir -p "$tmp/rt/image-correction/img/releases"
+          printf 'arte-corrigida' > "$tmp/rt/image-correction/img/releases/release-v1.2.3-new.webp"
+          : > "$GITHUB_ENV"
+          bash "$GITHUB_WORKSPACE/scripts/image-step.sh" resolve
+          grep -q '^IMAGE_RESOLVED_NAME=release-v1.2.3-new.webp$' "$GITHUB_ENV"
+          grep -q '^IMAGE_SOURCE=branch$' "$GITHUB_ENV"
+          grep -q '^IMAGE_ASSET_NAME=release-v1.2.3.webp$' "$GITHUB_ENV"
+          # era declarada e ausente: found=false com o motivo nomeando o arquivo
+          rm "$tmp/img/releases/release-v1.2.3.webp" "$tmp/rt/image-correction/img/releases/release-v1.2.3-new.webp"
+          : > "$GITHUB_ENV"
+          bash "$GITHUB_WORKSPACE/scripts/image-step.sh" resolve
+          grep -q '^IMAGE_REASON=era-missing$' "$GITHUB_ENV"
+          grep -q '^IMAGE_RESOLVED_NAME=$' "$GITHUB_ENV"
+          # sem `changes`, vale a cadeia por nome, que não alcança linhas antigas:
+          # a v1.2.4 cai no arquivo da linha 1.2, nunca no da 1.0.
+          printf 'arte-da-linha' > "$tmp/img/releases/release-v1.2.webp"
+          printf '{"release":{"title":"Demo","image":{"path":"img/releases"}}}' > "$tmp/.github-release.config.json"
+          : > "$GITHUB_ENV"
+          bash "$GITHUB_WORKSPACE/scripts/image-step.sh" resolve
+          grep -q '^IMAGE_RESOLVED_NAME=release-v1.2.webp$' "$GITHUB_ENV"
+          grep -q '^IMAGE_ERA_FROM=$' "$GITHUB_ENV"
+          grep -q '^IMAGE_REASON=$' "$GITHUB_ENV"
+
       - name: Smoke test da guarda por digest
         run: |
           tmp="$(mktemp -d)"
@@ -151,6 +197,106 @@ jobs:
           : > "$GH_STUB_UPLOADS"
           run | grep -q "nada a reenviar"
           [ ! -s "$GH_STUB_UPLOADS" ]
+
+      - name: Smoke test da distribuição por célula
+        run: |
+          # Simula o runner: GITHUB_ENV aceita `KEY=valor` e o formato heredoc
+          # `KEY<<MARCA` ... `MARCA`. Um leitor de `KEY=valor` sozinho ignora o
+          # segundo, e a DOWNLOADS_TABLE é multilinha - sem isto ela não chega
+          # ao step do corpo e a tabela nunca aparece.
+          load_env() {
+            local line key value marker=""
+            while IFS= read -r line || [ -n "$line" ]; do
+              case "$line" in
+                *'<<'*) marker="${line#*<<}"; key="${line%%<<*}"; value="";;
+                "$marker") if [ -n "$marker" ]; then marker=""; export "$key=$value"; fi ;;
+                "") ;;
+                *=*) if [ -z "$marker" ]; then export "${line%%=*}=${line#*=}"; fi ;;
+                *) if [ -n "$marker" ]; then value="${value:+$value$'\n'}$line"; fi ;;
+              esac
+            done < "$1"
+          }
+          tmp="$(mktemp -d)"
+          mkdir -p "$tmp/proj/.github" "$tmp/proj/dist" "$tmp/proj/bundle/msi" "$tmp/proj/bundle/nsis" "$tmp/proj/docs/images/releases" "$tmp/rt" "$tmp/stub"
+          printf '{"name":"synthetic","version":"1.4.0"}' > "$tmp/proj/package.json"
+          printf '{}' > "$tmp/proj/package-lock.json"
+          cat > "$tmp/proj/.github/release.config.json" <<'JSON'
+          {"release":{"title":"Demo","image":{"path":"docs/images/releases"}},
+           "distribution":{"downloads_table":true,"artifacts":[
+             {"id":"web","path":"dist/site.zip","os":["ubuntu-latest"],"required":false,"label":"Web","platform":"web"},
+             {"id":"win","globs":["bundle/**/*.msi"],"os":["windows-latest"],"required":true,
+              "label":"Windows","platform":"windows","architecture":"x64",
+              "release_name":"Demo-{version}-x64.msi"},
+             {"id":"mac","globs":["bundle/**/*.dmg"],"os":["macos-latest"],"required":false}]}}
+          JSON
+          printf 'placeholder' > "$tmp/proj/docs/images/releases/release.webp"
+          printf 'web' > "$tmp/proj/dist/site.zip"
+          printf 'msi' > "$tmp/proj/bundle/msi/Demo_1.4.0_x64.msi"
+          printf 'exe' > "$tmp/proj/bundle/nsis/Demo_1.4.0_x64-setup.exe"
+          cat > "$tmp/stub/gh" <<'STUB'
+          #!/usr/bin/env bash
+          case "$1" in
+            api) cat "$GH_STUB_RELEASES" ;;
+            release) [ "$2" = "upload" ] && { echo "$@" >> "$GH_STUB_UPLOADS"; exit 0; } ;;
+          esac
+          exit 0
+          STUB
+          chmod +x "$tmp/stub/gh"
+          export PATH="$tmp/stub:$PATH"
+          export GH_STUB_UPLOADS="$tmp/uploads.txt" GH_STUB_RELEASES="$tmp/r.json"
+          : > "$GH_STUB_UPLOADS"
+          printf '[{"tag_name":"v1.4.0","draft":true,"assets":[]}]' > "$GH_STUB_RELEASES"
+          set -e
+          export REPO=mafhper/demo TAG=v1.4.0
+          export TOOLS_DIR="$GITHUB_WORKSPACE" GITHUB_ENV="$tmp/env"
+          export ARTIFACT_CELL_OS=windows-latest ARTIFACT_OUT="$tmp/collected.txt"
+          export ARTIFACT_WORKDIR="$tmp/proj"
+          : > "$GITHUB_ENV"
+          node "$TOOLS_DIR/scripts/release-config.mjs" "$tmp/proj/.github/release.config.json" --env >> "$GITHUB_ENV"
+          # simula o runner: o GITHUB_ENV vira variavel de ambiente no step seguinte
+          load_env "$GITHUB_ENV"
+          node "$TOOLS_DIR/scripts/collect-artifacts.mjs"
+          # a celula do Windows coleta o MSI dela e ignora web e mac
+          grep -q 'Demo-1.4.0-x64.msi' "$ARTIFACT_OUT"
+          ! grep -q 'site.zip' "$ARTIFACT_OUT"
+          ! grep -q 'dmg' "$ARTIFACT_OUT"
+          # a celula do macOS so tem artefato opcional, que nao existe: passa
+          ARTIFACT_CELL_OS=macos-latest ARTIFACT_OUT="$tmp/collected-mac.txt" \
+            node "$TOOLS_DIR/scripts/collect-artifacts.mjs"
+          [ ! -s "$tmp/collected-mac.txt" ]
+          # matriz: a celula que prometeu o MSI e nao gerou reprova
+          if MATRIX_EXPECT='["bundle/**/*.dmg"]' node "$TOOLS_DIR/scripts/check-cell-expect.mjs" 2>/dev/null; then
+            echo "esperava reprovar: a celula nao gerou o DMG que prometeu"; exit 1
+          fi
+          MATRIX_EXPECT='["bundle/nsis/*.exe"]' node "$TOOLS_DIR/scripts/check-cell-expect.mjs" >/dev/null
+          # A conferencia usa a fresta RELEASES_JSON, e nao o stub de gh: o stub
+          # e um script bash sem extensao, que o node nao resolve fora do Linux.
+          # A chamada ao gh em si tem uma linha e a mesma forma das que o
+          # image-step.sh ja exercita com stub; a REGRA esta coberta por teste
+          # de unidade, inclusive o caso de obrigatorio ausente.
+          # a release tem o que foi prometido: a conferencia passa
+          export RELEASES_JSON='[{"tag_name":"v1.4.0","draft":true,"assets":[{"name":"Demo-1.4.0-x64.msi","size":3}]}]'
+          node "$TOOLS_DIR/scripts/verify-artifacts.mjs"
+          # e reprova quando o obrigatorio nao chegou
+          export RELEASES_JSON='[{"tag_name":"v1.4.0","draft":true,"assets":[]}]'
+          if node "$TOOLS_DIR/scripts/verify-artifacts.mjs" >/dev/null 2>&1; then
+            echo "esperava reprovar: artefato obrigatorio ausente"; exit 1
+          fi
+          # a tabela de downloads sai dos assets reais
+          export RELEASES_JSON='[{"tag_name":"v1.4.0","draft":true,"assets":[{"name":"Demo-1.4.0-x64.msi","size":3}]}]'
+          node "$TOOLS_DIR/scripts/verify-artifacts.mjs" >/dev/null
+          grep -q 'DOWNLOADS_TABLE' "$GITHUB_ENV"
+          grep -q 'Demo-1.4.0-x64.msi' "$GITHUB_ENV"
+          # simula o runner de novo: a tabela foi escrita no passo seguinte
+          load_env "$GITHUB_ENV"
+          # e o corpo aceita a tabela
+          export RELEASE_TITLE=Demo NOTES_GRANULARITY=tag NOTES_DIR="$tmp/notes"
+          export IMAGE_URL=https://github.com/mafhper/demo/releases/download/v1.4.0/release.webp
+          mkdir -p "$tmp/notes"
+          cd "$tmp/proj"
+          bash "$TOOLS_DIR/scripts/release-body.sh" "$tmp/body.md" >/dev/null
+          grep -q '## Downloads' "$tmp/body.md"
+          grep -q 'Windows | windows · x64' "$tmp/body.md"
 
   actionlint:
     runs-on: ubuntu-latest

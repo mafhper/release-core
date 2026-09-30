@@ -1,0 +1,43 @@
+{
+  "release": {
+    "title": "Mark-Lee",
+    "tagline": "Reune um editor Markdown elegante e um espaco local-first de Memorias sobre os mesmos arquivos.",
+    "language": "pt-BR",
+    "image": {
+      "path": "docs/images/releases",
+      "required": true,
+      "granularity": "minor",
+      "prefix": "release",
+      "ext": ".webp",
+      "upload": true,
+      "allow_correction": true
+    },
+    "notes": { "granularity": "minor" }
+  },
+  "build": {
+    "package_manager": "npm",
+    "node": "22.22.0",
+    "rust": "stable",
+    "working_directory": ".",
+    "apt": [
+      "libglib2.0-dev",
+      "libgtk-3-dev",
+      "libwebkit2gtk-4.1-dev",
+      "libjavascriptcoregtk-4.1-dev",
+      "libappindicator3-dev",
+      "librsvg2-dev",
+      "patchelf"
+    ]
+  },
+  "desktop": {
+    "enabled": true,
+    "project_path": "."
+  },
+  "versions": {
+    "files": [
+      { "path": "package.json", "format": "json", "field": "version" },
+      { "path": "src-tauri/tauri.conf.json", "format": "json", "field": "version" },
+      { "path": "src-tauri/Cargo.toml", "format": "toml", "field": "package.version" }
+    ]
+  }
+}

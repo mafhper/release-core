@@ -1,0 +1,67 @@
+{
+  "release": {
+    "title": "push_",
+    "tagline": "A GitHub repository attention dashboard. Desktop, private, no cloud.",
+    "language": "en",
+    "notesGranularity": "minor",
+    "imagePath": "docs/images/releases/release.webp",
+    "imageRequired": true,
+    "imageGranularity": "minor",
+    "imageDir": "docs/images/releases",
+    "imagePrefix": "release",
+    "imageExt": ".webp",
+    "imageUpload": true,
+    "imageAllowCorrection": true,
+    "imageCorrectionSuffix": "-new",
+    "imageTitleInBody": true,
+    "imageReuse": "forbid",
+    "imageChanges": [],
+    "usage": "",
+    "extra": ""
+  },
+  "build": {
+    "packageManager": "npm",
+    "node": "22",
+    "bun": "",
+    "rust": "stable",
+    "workingDirectory": ".",
+    "apt": [
+      "libwebkit2gtk-4.1-dev",
+      "libgtk-3-dev",
+      "libjavascriptcoregtk-4.1-dev",
+      "libappindicator3-dev",
+      "librsvg2-dev",
+      "patchelf"
+    ],
+    "gates": [
+      "npm ci",
+      "npm run lint",
+      "npm run type-check",
+      "npm run test:ci"
+    ],
+    "pre": [],
+    "command": ""
+  },
+  "desktop": {
+    "enabled": true,
+    "projectPath": "."
+  },
+  "distribution": {
+    "artifacts": [],
+    "downloadsTable": false
+  },
+  "versions": {
+    "files": [
+      {
+        "path": "src-tauri/tauri.conf.json",
+        "format": "json",
+        "field": "version"
+      },
+      {
+        "path": "src-tauri/Cargo.toml",
+        "format": "toml",
+        "field": "package.version"
+      }
+    ]
+  }
+}

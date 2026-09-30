@@ -1,0 +1,83 @@
+{
+  "release": {
+    "title": "IconCore",
+    "tagline": "Icones de aplicativo gratuitos e de codigo aberto, do primeiro esboco aos arquivos finais.",
+    "language": "pt-BR",
+    "notesGranularity": "tag",
+    "imagePath": "docs/images/releases/release.webp",
+    "imageRequired": true,
+    "imageGranularity": "minor",
+    "imageDir": "docs/images/releases",
+    "imagePrefix": "release",
+    "imageExt": ".webp",
+    "imageUpload": true,
+    "imageAllowCorrection": true,
+    "imageCorrectionSuffix": "-new",
+    "imageTitleInBody": true,
+    "imageReuse": "forbid",
+    "imageChanges": [],
+    "usage": "",
+    "extra": ""
+  },
+  "build": {
+    "packageManager": "npm",
+    "node": "22",
+    "bun": "",
+    "rust": "stable",
+    "workingDirectory": ".",
+    "apt": [
+      "pkg-config",
+      "libgtk-3-dev",
+      "libwebkit2gtk-4.1-dev",
+      "libayatana-appindicator3-dev",
+      "librsvg2-dev",
+      "patchelf",
+      "libssl-dev"
+    ],
+    "gates": [
+      "npm audit --audit-level=high",
+      "npm run lint",
+      "npm run typecheck",
+      "npm run test"
+    ],
+    "pre": [],
+    "command": ""
+  },
+  "desktop": {
+    "enabled": true,
+    "projectPath": "apps/desktop"
+  },
+  "distribution": {
+    "artifacts": [],
+    "downloadsTable": false
+  },
+  "versions": {
+    "files": [
+      {
+        "path": "apps/web/package.json",
+        "format": "json",
+        "field": "version"
+      },
+      {
+        "path": "apps/promo/package.json",
+        "format": "json",
+        "field": "version"
+      },
+      {
+        "path": "apps/desktop/package.json",
+        "format": "json",
+        "field": "version"
+      },
+      {
+        "path": "apps/desktop/src-tauri/tauri.conf.json",
+        "format": "json",
+        "field": "version"
+      },
+      {
+        "path": "apps/desktop/src-tauri/Cargo.toml",
+        "format": "toml",
+        "field": "package.version"
+      }
+    ]
+  }
+}

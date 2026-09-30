@@ -1,0 +1,27 @@
+{
+  "release": {
+    "title": "Spread",
+    "tagline": "Generate elegant link visualizations with full customization.",
+    "language": "en",
+    "image": {
+      "required": true,
+      "granularity": "minor"
+    },
+    "notes": {
+      "granularity": "tag"
+    },
+    "sections": {
+      "usage": "## Usage\n\nAccess the published version at **[mafhper.github.io/spread](https://mafhper.github.io/spread)**"
+    }
+  },
+  "build": {
+    "package_manager": "bun",
+    "node": "22.13.0",
+    "bun": "1.3.13",
+    "gates": ["bun run lint", "bun run type-check", "bun run test:core"],
+    "command": "bun run build"
+  },
+  "versions": {
+    "files": []
+  }
+}

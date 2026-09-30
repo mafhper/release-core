@@ -1,0 +1,39 @@
+{
+  "release": {
+    "title": "Personal News",
+    "tagline": "Reune seus feeds, podcasts e videos em uma experiencia de leitura local e personalizavel.",
+    "language": "pt-BR",
+    "image": {
+      "path": "docs/images/releases/release.webp",
+      "required": true,
+      "granularity": "minor",
+      "upload": true,
+      "title_in_body": false
+    },
+    "notes": {
+      "granularity": "minor"
+    },
+    "sections": {
+      "usage": "## Instalacao\n\n| Sistema | Arquivo recomendado |\n| --- | --- |"
+    }
+  },
+  "build": {
+    "package_manager": "bun",
+    "node": "20",
+    "bun": "1.x",
+    "rust": "stable",
+    "apt": ["libwebkit2gtk-4.1-dev", "libayatana-appindicator3-dev", "librsvg2-dev", "patchelf"],
+    "gates": ["bun run desktop:installer-assets:check"],
+    "pre": ["node scripts/prepare-backend.mjs"]
+  },
+  "desktop": {
+    "enabled": true,
+    "project_path": "apps/desktop"
+  },
+  "versions": {
+    "files": [
+      { "path": "apps/desktop/src-tauri/tauri.conf.json", "format": "json", "field": "version" },
+      { "path": "apps/desktop/src-tauri/Cargo.toml", "format": "toml", "field": "package.version" }
+    ]
+  }
+}

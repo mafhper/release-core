@@ -61,6 +61,14 @@ if [ -n "${RELEASE_TAGLINE:-}" ]; then
   printf -v out '%s\n> %s\n' "$out" "$RELEASE_TAGLINE"
 fi
 
+# Tabela de downloads. Vem do verify-artifacts.mjs, montada a partir dos assets
+# que a release tem - nunca do que foi apenas declarado. A alternativa era
+# `sections.usage` escrita a mao, e ela ja divergiu do nome real gerado pelo
+# Tauri uma vez, rendendo link 404 sem ninguem ver.
+if [ -n "${DOWNLOADS_TABLE:-}" ]; then
+  printf -v out '%s\n%s\n' "$out" "$DOWNLOADS_TABLE"
+fi
+
 # Notas manuais (opcionais)
 notes_granularity="${NOTES_GRANULARITY:-tag}"
 notes_dir="${NOTES_DIR:-.github/release-notes}"

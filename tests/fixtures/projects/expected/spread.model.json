@@ -1,0 +1,48 @@
+{
+  "release": {
+    "title": "Spread",
+    "tagline": "Generate elegant link visualizations with full customization.",
+    "language": "en",
+    "notesGranularity": "tag",
+    "imagePath": "docs/images/releases/release.webp",
+    "imageRequired": true,
+    "imageGranularity": "minor",
+    "imageDir": "docs/images/releases",
+    "imagePrefix": "release",
+    "imageExt": ".webp",
+    "imageUpload": true,
+    "imageAllowCorrection": true,
+    "imageCorrectionSuffix": "-new",
+    "imageTitleInBody": true,
+    "imageReuse": "forbid",
+    "imageChanges": [],
+    "usage": "## Usage\n\nAccess the published version at **[mafhper.github.io/spread](https://mafhper.github.io/spread)**",
+    "extra": ""
+  },
+  "build": {
+    "packageManager": "bun",
+    "node": "22.13.0",
+    "bun": "1.3.13",
+    "rust": "",
+    "workingDirectory": ".",
+    "apt": [],
+    "gates": [
+      "bun run lint",
+      "bun run type-check",
+      "bun run test:core"
+    ],
+    "pre": [],
+    "command": "bun run build"
+  },
+  "desktop": {
+    "enabled": false,
+    "projectPath": "."
+  },
+  "distribution": {
+    "artifacts": [],
+    "downloadsTable": false
+  },
+  "versions": {
+    "files": []
+  }
+}
