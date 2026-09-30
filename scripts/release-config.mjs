@@ -2,6 +2,7 @@
 import { readFileSync } from "node:fs";
 import { dirname, posix as posixPath, resolve } from "node:path";
 import { fileURLToPath, pathToFileURL } from "node:url";
+import { compareVersions, parseTag } from "./prev-tag.mjs";
 
 // Caminhos do config são sempre POSIX (o contrato é o mesmo nos três sistemas),
 // então a manipulação de diretório/nome de arquivo da arte não pode depender de
@@ -13,6 +14,8 @@ const VALID_LANGUAGES = new Set(["en", "pt-BR"]);
 const VALID_PACKAGE_MANAGERS = new Set(["bun", "npm"]);
 const VALID_NOTES_GRANULARITY = new Set(["tag", "minor"]);
 const VALID_IMAGE_GRANULARITY = new Set(["tag", "minor"]);
+const VALID_IMAGE_REUSE = new Set(["forbid", "allow"]);
+const FULL_TAG_RE = /^v\d+\.\d+\.\d+$/;
 
 function fail(message) {
   console.error(`[release-config] ${message}`);
@@ -109,6 +112,144 @@ function arrayify(value, path, name) {
   return out;
 }
 
+/** Slug estável: vira chave de ambiente e aparece em mensagem de log. */
+const SLUG_RE = /^[a-z0-9][a-z0-9._-]*$/;
+
+function optionalString(value, path, name) {
+  if (value === undefined || value === null) return "";
+  if (typeof value !== "string") fail(`${path}.${name} deve ser string.`);
+  return value;
+}
+
+/**
+ * Normaliza a distribuição para uma lista de artefatos com escopo.
+ *
+ * Cada artefato diz: quais células da matriz o produzem (`os`), se é
+ * obrigatório (`required`), o que ele é (`kind`), e como se apresenta
+ * (`label`, `platform`, `architecture`). O `os` é o que torna o perfil misto
+ * possível: sem ele, todo artefato é exigido em toda célula, e um projeto com
+ * matriz não consegue declarar nada.
+ *
+ * `required` significa **exatamente** "este artefato tem de aparecer na
+ * release". Ausente e obrigatório reprova; ausente e opcional avisa. A
+ * conferência de que os obrigatórios realmente chegaram à release é do
+ * `verify-artifacts.mjs`, no `finalize` — porque só lá se vê a release inteira.
+ */
+function normalizeArtifacts(distribution, legacy, desktopEnabled) {
+  const hasNew = distribution.artifacts !== undefined && distribution.artifacts !== null;
+  const hasLegacy =
+    legacy.enabled !== undefined || legacy.path !== undefined || legacy.globs !== undefined;
+
+  if (hasNew && hasLegacy) {
+    fail(
+      "distribution.artifacts e o bloco artifact não podem ser declarados juntos. " +
+        "O bloco artifact é a forma antiga e já está coberto por distribution.artifacts: " +
+        'a migração é { "id": "artifact", "path": <mesmo path>, "globs": <mesmos globs>, ' +
+        '"release_name": <mesmo release_name>, "validate": <mesmas validações> }, ' +
+        "com required e os os que forem os de verdade.",
+    );
+  }
+
+  // --- forma nova ---
+  if (hasNew) {
+    if (!Array.isArray(distribution.artifacts)) {
+      fail("distribution.artifacts deve ser um array.");
+    }
+    const seen = new Set();
+    return distribution.artifacts.map((entry, index) => {
+      const at = `distribution.artifacts[${index}]`;
+      if (typeof entry !== "object" || entry === null || Array.isArray(entry)) {
+        fail(`${at} deve ser um objeto.`);
+      }
+      const id = entry.id;
+      if (typeof id !== "string" || !SLUG_RE.test(id)) {
+        fail(
+          `${at}.id deve ser um identificador em minúsculas, começando por letra ou número, ` +
+            `com ponto, hífen ou underscore (recebido: "${id}"). Ele vira chave de ambiente e aparece nas mensagens do log.`,
+        );
+      }
+      if (seen.has(id)) {
+        fail(`${at}.id ("${id}") repete. Duas entradas com o mesmo id não podem ser distinguidas no log nem na conferência da release.`);
+      }
+      seen.add(id);
+
+      const paths = arrayify(entry.path, at, "path");
+      const globs = arrayify(entry.globs, at, "globs");
+      if (paths.length === 0 && globs.length === 0) {
+        fail(`${at} (id "${id}") precisa de path ou globs: sem os dois, não há o que coletar.`);
+      }
+      for (const glob of globs) {
+        if (!glob.includes("*") && !glob.includes("?")) {
+          fail(`${at}.globs deve conter padrões glob ("${glob}" não parece um padrão).`);
+        }
+      }
+
+      // `"*"` é "qualquer célula". É o default porque é o que o bloco legado
+      // fazia, e o que um projeto de job único precisa.
+      const os = arrayify(entry.os, at, "os");
+      if (os.length === 0) os.push("*");
+
+      const required = entry.required ?? true;
+      if (typeof required !== "boolean") {
+        fail(`${at}.required deve ser booleano.`);
+      }
+
+      return {
+        id,
+        paths,
+        globs,
+        os,
+        required,
+        kind: optionalString(entry.kind, at, "kind"),
+        label: optionalString(entry.label, at, "label"),
+        platform: optionalString(entry.platform, at, "platform"),
+        architecture: optionalString(entry.architecture, at, "architecture"),
+        releaseName: optionalString(entry.release_name, at, "release_name"),
+        validate: requireStringArray(entry.validate, at, "validate"),
+      };
+    });
+  }
+
+  // --- forma antiga: uma entrada, mesmo comportamento ---
+  if (!hasLegacy || legacy.enabled === false) {
+    void desktopEnabled;
+    return [];
+  }
+  const paths = arrayify(legacy.path, "artifact", "path");
+  const globs = arrayify(legacy.globs, "artifact", "globs");
+  if (paths.length === 0 && globs.length === 0) {
+    fail(
+      "artifact.enabled está ativo, mas artifact.path e artifact.globs estão vazios (nada para publicar).",
+    );
+  }
+  for (const glob of globs) {
+    if (!glob.includes("*") && !glob.includes("?")) {
+      fail(`artifact.globs deve conter padrões glob ("${glob}" não parece um padrão).`);
+    }
+  }
+  if (paths.length > 1 && optionalString(legacy.release_name, "artifact", "release_name") !== "") {
+    fail(
+      `artifact.release_name exige exatamente um arquivo, e artifact.path declara ${paths.length}. ` +
+        "Em distribution.artifacts, cada artefato com release_name declara o seu próprio path.",
+    );
+  }
+  return [
+    {
+      id: "artifact",
+      paths,
+      globs,
+      os: ["*"],
+      required: true,
+      kind: "",
+      label: "",
+      platform: "",
+      architecture: "",
+      releaseName: optionalString(legacy.release_name, "artifact", "release_name"),
+      validate: requireStringArray(legacy.validate, "artifact", "validate"),
+    },
+  ];
+}
+
 function load(configPath) {
   baseDir = findRepoRoot(dirname(resolve(configPath)));
   const config = readJson(configPath);
@@ -200,6 +341,65 @@ function load(configPath) {
     fail("release.image.title_in_body deve ser booleano.");
   }
 
+  // Se a arte pode ser reusada de propósito entre releases. "forbid" (padrão)
+  // é o comportamento de sempre: o gate cobra que a arte mude quando a política
+  // diz que tem que mudar. "allow" transforma a cobrança em um aviso que declara
+  // a decisão - que é o que faltava quando um release foi adiado por falta de
+  // um insumo que a máquina não produz.
+  const imageReuse = image.reuse ?? "forbid";
+  if (!VALID_IMAGE_REUSE.has(imageReuse)) {
+    fail(
+      `release.image.reuse deve ser "forbid" ou "allow" (recebido: "${imageReuse}").`,
+    );
+  }
+
+  // Eras de arte: pontos em que a arte muda de propósito, declarados no
+  // contrato. Sem esta chave, a arte é resolvida por nome de arquivo
+  // (comportamento atual, inalterado). Com ela, a lista é a autoridade e a
+  // troca dentro da linha `major.minor` deixa de ser um efeito colateral de
+  // reescrever o arquivo no lugar.
+  const imageChanges = [];
+  if (image.changes !== undefined && image.changes !== null) {
+    if (!Array.isArray(image.changes)) {
+      fail("release.image.changes deve ser um array de { from, file }.");
+    }
+    const seenFrom = new Set();
+    image.changes.forEach((entry, index) => {
+      const at = `release.image.changes[${index}]`;
+      if (typeof entry !== "object" || entry === null || Array.isArray(entry)) {
+        fail(`${at} deve ser um objeto { from, file }.`);
+      }
+      if (typeof entry.from !== "string" || !FULL_TAG_RE.test(entry.from)) {
+        fail(
+          `${at}.from deve ser uma tag completa vX.Y.Z, porque a era precisa de um ponto de partida inequívoco (recebido: "${entry.from}").`,
+        );
+      }
+      if (typeof entry.file !== "string" || entry.file.trim() === "") {
+        fail(`${at}.file deve ser um nome de arquivo não vazio.`);
+      }
+      // Só nome de arquivo dentro de imageDir: um caminho com barra abriria a
+      // porta para declarar arte fora do diretório de releases, que é o
+      // contrato que o URL do corpo assume.
+      if (/[/\\]/.test(entry.file) || entry.file === ".." || entry.file.startsWith(".")) {
+        fail(
+          `${at}.file deve ser um nome de arquivo dentro de ${imageDir}, sem barra nem ponto inicial (recebido: "${entry.file}").`,
+        );
+      }
+      if (seenFrom.has(entry.from)) {
+        fail(
+          `${at}.from ("${entry.from}") repete uma era já declarada. Duas eras no mesmo ponto de partida são ambíguas: o Core não sabe qual delas vale.`,
+        );
+      }
+      seenFrom.add(entry.from);
+      imageChanges.push({ from: entry.from, file: entry.file });
+    });
+    // Ordenado por versão para que a resolução seja uma busca do maior `from`
+    // aplicável, e não uma varredura na ordem em que alguém digitou. Aceita
+    // qualquer ordem no arquivo: o que importa é que a comparação seja
+    // determinística.
+    imageChanges.sort((a, b) => compareVersions(parseTag(a.from), parseTag(b.from)));
+  }
+
   const sections = release.sections ?? {};
 
   const build = config.build ?? {};
@@ -246,38 +446,26 @@ function load(configPath) {
     if (!rust) {
       fail('desktop.enabled é true, mas build.rust está vazio (Tauri exige Rust).');
     }
-    if (build.command) {
-      fail('desktop.enabled é true e não permite build.command (use tauri-action).');
-    }
     if ((build.apt ?? []).length === 0) {
       console.error("[release-config] aviso: desktop sem build.apt (dependências de sistema) declaradas.");
     }
   }
 
-  const artifact = config.artifact ?? {};
-  const artifactEnabled = artifact.enabled ?? false;
-  const artifactPaths = arrayify(artifact.path, "artifact", "path");
-  const artifactGlobs = arrayify(artifact.globs, "artifact", "globs");
-  const artifactValidate = requireStringArray(artifact.validate, "artifact", "validate");
-  const artifactReleaseName =
-    typeof artifact.release_name === "string" && artifact.release_name.trim() !== ""
-      ? artifact.release_name
-      : null;
-
-  if (desktopEnabled && artifactEnabled) {
-    fail("artifact.enabled não pode ser true com desktop.enabled (tauri-action publica).");
-  }
-  if (artifactEnabled) {
-    if (artifactPaths.length === 0 && artifactGlobs.length === 0) {
-      fail(
-        "artifact.enabled está ativo, mas artifact.path e artifact.globs estão vazios (nada para publicar).",
-      );
-    }
-    for (const glob of artifactGlobs) {
-      if (!glob.includes("*") && !glob.includes("?")) {
-        fail(`artifact.globs deve conter padrões glob ("${glob}" não parece um padrão).`);
-      }
-    }
+  // ---- distribuição -------------------------------------------------------
+  //
+  // O que o projeto entrega é uma lista de artefatos, e cada um declara a que
+  // célula da matriz o produz, se é obrigatório, e o que ele é. O bloco
+  // `artifact` legado (0..N arquivos, uma validação, um nome de release) é
+  // normalizado para **uma** entrada dessa lista, com o mesmo comportamento.
+  //
+  // `desktop.enabled` NÃO é mais exclusivo com artefato nem com `build.command`:
+  // um projeto com site público e instaladores é um perfil real, e ele é a
+  // razão de o contrato ter esta seção.
+  const distribution = config.distribution ?? {};
+  const artifacts = normalizeArtifacts(distribution, config.artifact ?? {}, desktopEnabled);
+  const downloadsTable = distribution.downloads_table ?? false;
+  if (typeof downloadsTable !== "boolean") {
+    fail("distribution.downloads_table deve ser booleano.");
   }
 
   const versions = config.versions ?? {};
@@ -316,6 +504,8 @@ function load(configPath) {
       imageAllowCorrection,
       imageCorrectionSuffix,
       imageTitleInBody,
+      imageReuse,
+      imageChanges,
       usage: sections.usage ?? "",
       extra: sections.extra ?? "",
     },
@@ -331,13 +521,7 @@ function load(configPath) {
       command: typeof build.command === "string" ? build.command : "",
     },
     desktop: { enabled: desktopEnabled, projectPath: desktopProjectPath },
-    artifact: {
-      enabled: artifactEnabled,
-      paths: artifactPaths,
-      globs: artifactGlobs,
-      validate: artifactValidate,
-      releaseName: artifactReleaseName,
-    },
+    distribution: { artifacts, downloadsTable },
     versions: { files: versionFiles },
   };
 }
@@ -364,6 +548,8 @@ function getKey(cfg, key) {
     image_allow_correction: cfg.release.imageAllowCorrection,
     image_correction_suffix: cfg.release.imageCorrectionSuffix,
     image_title_in_body: cfg.release.imageTitleInBody,
+    image_reuse: cfg.release.imageReuse,
+    image_changes: cfg.release.imageChanges,
     section_usage: cfg.release.usage,
     section_extra: cfg.release.extra,
     package_manager: cfg.build.packageManager,
@@ -377,11 +563,15 @@ function getKey(cfg, key) {
     command: cfg.build.command,
     desktop: cfg.desktop.enabled,
     desktop_project_path: cfg.desktop.projectPath,
-    artifact_enabled: cfg.artifact.enabled,
-    artifact_paths: cfg.artifact.paths,
-    artifact_globs: cfg.artifact.globs,
-    artifact_validate: cfg.artifact.validate,
-    artifact_release_name: cfg.artifact.releaseName ?? "",
+    // `artifact_enabled` e `artifact_paths` continuam existindo porque são o
+    // que o `--get` legado devolvia. Agora saem da lista de distribuição.
+    artifact_enabled: String(cfg.distribution.artifacts.length > 0),
+    artifact_paths: cfg.distribution.artifacts.flatMap((a) => a.paths),
+    artifact_globs: cfg.distribution.artifacts.flatMap((a) => a.globs),
+    artifact_validate: cfg.distribution.artifacts.flatMap((a) => a.validate),
+    artifact_release_name: cfg.distribution.artifacts.find((a) => a.releaseName)?.releaseName ?? "",
+    distribution_artifacts: cfg.distribution.artifacts,
+    downloads_table: cfg.distribution.downloadsTable,
     version_files: cfg.versions.files,
   };
   if (!(key in map)) {
@@ -416,6 +606,8 @@ function printEnv(cfg) {
   emitEnvLine(lines, "IMAGE_ALLOW_CORRECTION", String(cfg.release.imageAllowCorrection));
   emitEnvLine(lines, "IMAGE_CORRECTION_SUFFIX", cfg.release.imageCorrectionSuffix);
   emitEnvLine(lines, "IMAGE_TITLE_IN_BODY", String(cfg.release.imageTitleInBody));
+  emitEnvLine(lines, "IMAGE_REUSE", cfg.release.imageReuse);
+  emitEnvLine(lines, "IMAGE_CHANGES", JSON.stringify(cfg.release.imageChanges));
   emitEnvLine(lines, "PKG_MANAGER", cfg.build.packageManager);
   emitEnvLine(lines, "NODE_VERSION", cfg.build.node);
   emitEnvLine(lines, "BUN_VERSION", cfg.build.bun);
@@ -427,11 +619,40 @@ function printEnv(cfg) {
   emitEnvLine(lines, "BUILD_COMMAND", cfg.build.command);
   emitEnvLine(lines, "DESKTOP", String(cfg.desktop.enabled));
   emitEnvLine(lines, "DESKTOP_PROJECT_PATH", cfg.desktop.projectPath);
-  emitEnvLine(lines, "ARTIFACT_ENABLED", String(cfg.artifact.enabled));
-  emitEnvLine(lines, "ARTIFACT_PATHS", JSON.stringify(cfg.artifact.paths));
-  emitEnvLine(lines, "ARTIFACT_GLOBS", JSON.stringify(cfg.artifact.globs));
-  emitEnvLine(lines, "ARTIFACT_VALIDATE", JSON.stringify(cfg.artifact.validate));
-  emitEnvLine(lines, "ARTIFACT_RELEASE_NAME", cfg.artifact.releaseName ?? "");
+  // A lista inteira vai num env só: o coletor é um script node, e serializar em
+  // N variáveis seria uma translation layer sem ganho.
+  emitEnvLine(lines, "DIST_ARTIFACTS", JSON.stringify(cfg.distribution.artifacts));
+  emitEnvLine(
+    lines,
+    "DIST_HAS_ARTIFACTS",
+    String(cfg.distribution.artifacts.length > 0),
+  );
+  emitEnvLine(lines, "DIST_DOWNLOADS_TABLE", String(cfg.distribution.downloadsTable));
+  emitEnvLine(
+    lines,
+    "ARTIFACT_ENABLED",
+    String(cfg.distribution.artifacts.length > 0),
+  );
+  emitEnvLine(
+    lines,
+    "ARTIFACT_PATHS",
+    JSON.stringify(cfg.distribution.artifacts.flatMap((a) => a.paths)),
+  );
+  emitEnvLine(
+    lines,
+    "ARTIFACT_GLOBS",
+    JSON.stringify(cfg.distribution.artifacts.flatMap((a) => a.globs)),
+  );
+  emitEnvLine(
+    lines,
+    "ARTIFACT_VALIDATE",
+    JSON.stringify(cfg.distribution.artifacts.flatMap((a) => a.validate)),
+  );
+  emitEnvLine(
+    lines,
+    "ARTIFACT_RELEASE_NAME",
+    cfg.distribution.artifacts.find((a) => a.releaseName)?.releaseName ?? "",
+  );
   emitEnvLine(lines, "VERSIONS_FILES", JSON.stringify(cfg.versions.files));
   if (cfg.release.tagline) emitEnvMultiline(lines, "RELEASE_TAGLINE", cfg.release.tagline);
   if (cfg.release.usage) emitEnvMultiline(lines, "SECTION_USAGE", cfg.release.usage);

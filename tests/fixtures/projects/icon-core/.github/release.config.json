@@ -1,0 +1,44 @@
+{
+  "release": {
+    "title": "IconCore",
+    "tagline": "Icones de aplicativo gratuitos e de codigo aberto, do primeiro esboco aos arquivos finais.",
+    "language": "pt-BR",
+    "image": {
+      "path": "docs/images/releases/release.webp",
+      "required": true,
+      "granularity": "minor"
+    },
+    "notes": {
+      "granularity": "tag"
+    }
+  },
+  "build": {
+    "package_manager": "npm",
+    "node": "22",
+    "rust": "stable",
+    "working_directory": ".",
+    "apt": [
+      "pkg-config",
+      "libgtk-3-dev",
+      "libwebkit2gtk-4.1-dev",
+      "libayatana-appindicator3-dev",
+      "librsvg2-dev",
+      "patchelf",
+      "libssl-dev"
+    ],
+    "gates": ["npm audit --audit-level=high", "npm run lint", "npm run typecheck", "npm run test"]
+  },
+  "desktop": {
+    "enabled": true,
+    "project_path": "apps/desktop"
+  },
+  "versions": {
+    "files": [
+      { "path": "apps/web/package.json", "format": "json", "field": "version" },
+      { "path": "apps/promo/package.json", "format": "json", "field": "version" },
+      { "path": "apps/desktop/package.json", "format": "json", "field": "version" },
+      { "path": "apps/desktop/src-tauri/tauri.conf.json", "format": "json", "field": "version" },
+      { "path": "apps/desktop/src-tauri/Cargo.toml", "format": "toml", "field": "package.version" }
+    ]
+  }
+}

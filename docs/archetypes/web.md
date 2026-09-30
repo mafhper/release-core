@@ -67,22 +67,27 @@ jobs:
 
 A arte é resolvida por tag, do mais específico ao mais genérico:
 
-`	ext
+```text
 docs/images/releases/release-v1.2.0-new.webp   correção (branch padrão)
 docs/images/releases/release-v1.2.0.webp       a tag
 docs/images/releases/release-v1.2.webp         a linha do minor
 docs/images/releases/release.webp              arquivo único (legado)
-`
+```
 
 - **granularity: "minor"** exige arte nova só em nova linha major.minor; com
-  "tag", a cada versão. O gate compara a arte **que está na tag** com a da
-  tag anterior.
+  "tag", a cada versão. O gate compara o **conteúdo** da arte com o da tag
+  anterior — não o nome do arquivo. Uma arte copiada byte a byte não passa como
+  arte nova, e quem quiser reusar de propósito declara `image.reuse: "allow"`.
+- **Trocar a arte dentro da linha**: `image.changes[]` declara as eras. Sem ela,
+  o único jeito de trocar no meio da linha `1.2` é reescrever o arquivo da linha
+  no lugar, e a intenção não aparece em revisão nenhuma.
 - **upload: true** (default) anexa a arte como asset da release e faz o corpo
   apontar para /releases/download/<tag>/<arquivo>, que pode ser corrigido sem
-  mover a tag. Use alse para manter a URL raw da tag.
-- **Corrigir depois da tag**: commite elease-v1.2.0-new.webp no branch padrão
-  e re-rode o workflow da tag. O sufixo -new é convenção de autoria: a
-  release não o expõe, e sobrescrever o arquivo da versão no branch padrão tem o
-  mesmo efeito.
+  mover a tag. Use `false` para manter a URL raw da tag.
+- **Corrigir depois da tag**: commite `release-v1.2.0-new.webp` no branch padrão
+  e re-rode o workflow da tag (`gh workflow run release.yml --ref main -f tag=v1.2.0`).
+  O `gh run rerun` **não** funciona, porque o pin do Core vem do arquivo no commit
+  da tag. O sufixo `-new` é convenção de autoria: a release não o expõe, e
+  sobrescrever o arquivo da versão no branch padrão tem o mesmo efeito.
 
 Detalhes em [../config-schema.md](../config-schema.md).

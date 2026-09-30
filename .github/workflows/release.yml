@@ -79,16 +79,8 @@ jobs:
 
       - name: Validar coerência da configuração
         run: |
-          if [ "$DESKTOP" = "true" ]; then
-            if [ -z "$RUST_TOOLCHAIN" ]; then
-              echo "::error::desktop é true, mas build.rust está vazio (Tauri exige Rust)."; exit 1
-            fi
-            if [ -n "$BUILD_COMMAND" ]; then
-              echo "::error::desktop é true e não permite build.command (use tauri-action)."; exit 1
-            fi
-            if [ "$ARTIFACT_ENABLED" = "true" ]; then
-              echo "::error::desktop é true e não permite artifact (tauri-action publica)."; exit 1
-            fi
+          if [ "$DESKTOP" = "true" ] && [ -z "$RUST_TOOLCHAIN" ]; then
+            echo "::error::desktop é true, mas build.rust está vazio (Tauri exige Rust)."; exit 1
           fi
           if [ -n "$BUN_VERSION" ] && [ "$PKG_MANAGER" != "bun" ]; then
             echo "::error::build.bun informado, mas build.package_manager não é \"bun\"."; exit 1
@@ -132,28 +124,12 @@ jobs:
         run: bash "${{ runner.temp }}/.release-tools/scripts/image-step.sh" resolve
 
       - name: Validar política da imagem de release
+        env:
+          CONFIG_FILE: ${{ inputs.config-file }}
+          PROJECT_ROOT: ${{ github.workspace }}
+          PREV_TAG: ${{ steps.versions.outputs.prev_tag }}
         run: |
-          if [ "$IMAGE_REQUIRED" = "true" ] && [ -z "$IMAGE_RESOLVED_PATH" ]; then
-            echo "::error::Nenhuma arte de release encontrada para ${{ steps.tag.outputs.tag }} em $IMAGE_DIR."; exit 1
-          fi
-          prev_tag="${{ steps.versions.outputs.prev_tag }}"
-          # O gate de "precisa mudar" vale para a arte que está na tag. Arte vinda
-          # do branch padrão (correção, com ou sem o sufixo -new) não participa do
-          # diff entre tags, porque aquele commit não a contém.
-          if [ -n "$prev_tag" ] && [ "$IMAGE_SOURCE" = "tag" ] && [ -n "$IMAGE_RESOLVED_PATH" ]; then
-            need_change=0
-            case "$IMAGE_GRANULARITY" in
-              tag) need_change=1 ;;
-              minor)
-                cur_line="${{ steps.versions.outputs.release_version }}"; cur_line="${cur_line%.*}"
-                prev_line="$(printf '%s' "$prev_tag" | sed -E 's/^v([0-9]+\.[0-9]+)\..*/\1/')"
-                if [ "$cur_line" != "$prev_line" ]; then need_change=1; fi
-                ;;
-            esac
-            if [ "$need_change" = "1" ] && ! git diff --name-only "$prev_tag".."$GITHUB_SHA" -- "$IMAGE_RESOLVED_REL" | grep -q .; then
-              echo "::error::A imagem de release precisa mudar entre $prev_tag e ${{ steps.tag.outputs.tag }} (granularidade $IMAGE_GRANULARITY, arte $IMAGE_RESOLVED_REL)."; exit 1
-            fi
-          fi
+          node "$RUNNER_TEMP/.release-tools/scripts/image-policy.mjs"
 
       - name: Criar ou recuperar o release (rascunho, idempotente)
         id: release
@@ -187,7 +163,7 @@ jobs:
       - name: Relatar topologia do build
         id: report
         run: |
-          if [ -n "$BUILD_COMMAND" ] || [ "$GATES" != "[]" ] || [ "$PRE_STEPS" != "[]" ] || [ "$ARTIFACT_ENABLED" = "true" ] || [ "$DESKTOP" = "true" ]; then
+          if [ -n "$BUILD_COMMAND" ] || [ "$GATES" != "[]" ] || [ "$PRE_STEPS" != "[]" ] || [ "$DIST_HAS_ARTIFACTS" = "true" ] || [ "$DESKTOP" = "true" ]; then
             echo "build_enabled=true" >> "$GITHUB_OUTPUT"
           else
             echo "build_enabled=false" >> "$GITHUB_OUTPUT"
@@ -197,6 +173,10 @@ jobs:
     needs: prepare
     if: ${{ needs.prepare.outputs.build_enabled == 'true' }}
     runs-on: ${{ matrix.os }}
+    # `matrix[].optional` marca a célula como tolerante a falha. É o que permite
+    # republicar sem a plataforma instável, que é exatamente o que um job
+    # separado e não-bloqueante fazia antes de o Core existir.
+    continue-on-error: ${{ matrix.optional == true }}
     env:
       TAG: ${{ needs.prepare.outputs.tag }}
     strategy:
@@ -280,7 +260,7 @@ jobs:
           done
 
       - name: Compilar o aplicativo
-        if: env.DESKTOP != 'true' && env.BUILD_COMMAND != ''
+        if: env.BUILD_COMMAND != ''
         working-directory: ${{ env.PROJECT_WORKDIR }}
         run: bash -eu -c "$BUILD_COMMAND"
 
@@ -360,42 +340,17 @@ jobs:
           prerelease: ${{ needs.prepare.outputs.is_prerelease == 'true' }}
           args: ${{ matrix.args }}
 
-      - name: Validar e publicar artefatos
-        if: env.DESKTOP != 'true' && env.ARTIFACT_ENABLED == 'true'
+      - name: Coletar e validar artefatos desta célula
+        if: env.DIST_HAS_ARTIFACTS == 'true'
+        env:
+          ARTIFACT_CELL_OS: ${{ matrix.os }}
+          ARTIFACT_OUT: ${{ runner.temp }}/collected.txt
         run: |
+          node "$RUNNER_TEMP/.release-tools/scripts/collect-artifacts.mjs"
           files=()
-          while IFS= read -r -d '' g; do
-            for f in $g; do files+=("$f"); done
-          done < <(printf '%s' "$ARTIFACT_GLOBS" | node -e 'let s="";process.stdin.on("data",d=>s+=d).on("end",()=>{const v=JSON.parse(s);process.stdout.write(v.join("\u0000") + "\0")})')
-          while IFS= read -r -d '' p; do
-            if [ ! -f "$p" ]; then
-              echo "::error::Artefato explícito ausente: $p"; exit 1
-            fi
-            files+=("$p")
-          done < <(printf '%s' "$ARTIFACT_PATHS" | node -e 'let s="";process.stdin.on("data",d=>s+=d).on("end",()=>{const v=JSON.parse(s);process.stdout.write(v.join("\u0000") + "\0")})')
+          while IFS= read -r f; do [ -n "$f" ] && files+=("$f"); done < "$RUNNER_TEMP/collected.txt"
           if [ "${#files[@]}" -eq 0 ]; then
-            echo "::error::artifact habilitado, mas nenhum arquivo foi encontrado (path/globs)."; exit 1
-          fi
-          for f in "${files[@]}"; do
-            if [ ! -s "$f" ]; then echo "::error::Artefato vazio: $f"; exit 1; fi
-          done
-          if [ "$ARTIFACT_VALIDATE" != "[]" ]; then
-            while IFS= read -r -d '' cmd; do
-              for f in "${files[@]}"; do
-                echo "» validando $f: $cmd"
-                bash -eu -c "$cmd" _ "$(pwd)/$f"
-              done
-            done < <(printf '%s' "$ARTIFACT_VALIDATE" | node -e 'let s="";process.stdin.on("data",d=>s+=d).on("end",()=>{const v=JSON.parse(s);process.stdout.write(v.join("\u0000") + "\0")})')
-          fi
-          if [ -n "$ARTIFACT_RELEASE_NAME" ]; then
-            if [ "${#files[@]}" -ne 1 ]; then
-              echo "::error::artifact.release_name exige exatamente um arquivo, mas foram encontrados ${#files[@]}."; exit 1
-            fi
-            version="$TAG"; version="${version#v}"; version="${version%%[-+]*}"
-            target="${ARTIFACT_RELEASE_NAME//\{version\}/$version}"
-            mkdir -p "$(dirname "$target")"
-            mv "${files[0]}" "$target"
-            files=("$target")
+            exit 0
           fi
           attempt=1
           until gh release upload "$TAG" --repo "$REPO" --clobber "${files[@]}"; do
@@ -406,7 +361,14 @@ jobs:
             attempt=$((attempt + 1))
             sleep 5
           done
-          echo "Artefatos publicados: ${files[*]}"
+          echo "Artefatos publicados por esta célula: ${#files[@]}"
+
+      - name: Conferir o que esta célula prometeu produzir
+        if: ${{ matrix.expect != null && matrix.expect != '' }}
+        env:
+          MATRIX_EXPECT: ${{ matrix.expect }}
+        run: |
+          node "$RUNNER_TEMP/.release-tools/scripts/check-cell-expect.mjs"
 
   finalize:
     needs: [prepare, build]
@@ -437,6 +399,11 @@ jobs:
           TOOLS_DIR: ${{ runner.temp }}/.release-tools
           EXPECTED_DIGEST: ${{ needs.prepare.outputs.contract_digest }}
         run: bash "${{ runner.temp }}/.release-tools/scripts/check-contract.sh" "$EXPECTED_DIGEST"
+
+      - name: Conferir a distribuição da release
+        if: env.DIST_HAS_ARTIFACTS == 'true'
+        run: |
+          node "$RUNNER_TEMP/.release-tools/scripts/verify-artifacts.mjs"
 
       - name: Publicar a arte de release
         env:

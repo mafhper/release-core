@@ -77,7 +77,13 @@ while IFS='=' read -r key value; do
 done < "$resolved_env"
 
 if [ -z "${IMAGE_RESOLVED_PATH:-}" ]; then
-  echo "::warning::Nenhuma arte de release encontrada para $TAG em $IMAGE_DIR."
+  if [ "${IMAGE_REASON:-}" = "era-missing" ]; then
+    # Não é "não há arte": a lista de eras disse qual arquivo deveria estar lá.
+    # Dizer "nenhuma arte encontrada" mandaria o autor procurar no lugar errado.
+    echo "::warning::image.changes[] declara '${IMAGE_ERA_FILE}' a partir de ${IMAGE_ERA_FROM}, e esse arquivo não está na tag $TAG em $IMAGE_DIR."
+  else
+    echo "::warning::Nenhuma arte de release encontrada para $TAG em $IMAGE_DIR."
+  fi
   exit 0
 fi
 
@@ -102,8 +108,9 @@ if [ "$IMAGE_UPLOAD" != "true" ]; then
   fi
   # A arte veio do branch padrão (correção pós-tag) e não há upload: não existe
   # URL estável para ela. A URL raw do branch mudaria de conteúdo a cada
-  # commit, o que a ADR-001 proíbe; servir a da tag mostraria a arte antiga sem
-  # avisar. Falhar é a única saída honesta.
+  # commit, e uma release antiga que aponta para ele passaria a exibir a arte
+  # nova; servir a da tag mostraria a arte antiga sem avisar. Falhar é a única
+  # saída honesta.
   echo "::error::A arte de release veio do branch padrão ($IMAGE_RESOLVED_NAME) e image.upload está desligado."
   echo "::error::Sem upload não há onde hospedar a correção: a URL raw do branch padrão não é estável e a da tag é a arte antiga."
   echo "::error::Ligie image.upload no release.config.json, ou remova a arte de correção do branch padrão."
@@ -134,26 +141,55 @@ local_size="$(wc -c < "$staged_asset" | tr -d ' ')"
 is_draft="true"
 published_digest=""
 published_size=""
+siblings=""
 
-# Estado do asset na release: rascunho, digest e tamanho. A API lista por
+# Estado do asset na release: rascunho, digest, tamanho e assets irmãos que
+# parecem arte de release (mesmo prefixo, mesma extensão). A API lista por
 # página em vez de por tag porque release em rascunho não responde por tag.
 if release_json="$(gh api "repos/$REPO/releases?per_page=100" 2>/dev/null)"; then
   if state="$(printf '%s' "$release_json" | node -e '
     let s = "";
     process.stdin.on("data", (d) => (s += d)).on("end", () => {
-      const [name, tag] = process.argv.slice(1);
+      const [name, tag, prefix, ext] = process.argv.slice(1);
       const rel = JSON.parse(s).find((r) => r.tag_name === tag);
       if (!rel) return;
       const asset = (rel.assets || []).find((a) => a.name === name);
+      // Irmãos: arte já presente com OUTRO nome. O asset alvo é o que este run
+      // publica; qualquer outro com o mesmo formato é candidato a órfão.
+      const others = (rel.assets || [])
+        .map((a) => a.name)
+        .filter((n) => n !== name && n.startsWith(prefix) && n.endsWith(ext));
       process.stdout.write(
-        [rel.draft ? "draft" : "published", asset ? asset.digest || "-" : "-", asset ? asset.size : "-"].join("|"),
+        [
+          rel.draft ? "draft" : "published",
+          asset ? asset.digest || "-" : "-",
+          asset ? asset.size : "-",
+          others.join(","),
+        ].join("|"),
       );
     });
-  ' "$IMAGE_ASSET_NAME" "$TAG")" && [ -n "$state" ]; then
+  ' "$IMAGE_ASSET_NAME" "$TAG" "$IMAGE_PREFIX" "$IMAGE_EXT")" && [ -n "$state" ]; then
     is_draft="$(printf '%s' "$state" | cut -d'|' -f1)"
     published_digest="$(printf '%s' "$state" | cut -d'|' -f2)"
     published_size="$(printf '%s' "$state" | cut -d'|' -f3)"
+    siblings="$(printf '%s' "$state" | cut -d'|' -f4)"
   fi
+fi
+
+# Asset órfão. O asset publicado usa sempre o nome canônico do arquivo
+# resolvido; quando a resolução veio do arquivo da linha em vez do da tag, esse
+# nome muda, e o asset anterior fica ao lado do novo. A guarda por digest compara
+# com o asset de MESMO nome, então não enxerga o órfão: sem este aviso ele sai
+# de cena em silêncio e o dono só descobre olhando a release — foi o que aconteceu
+# no aurawall, que apagou o asset a mão (achado E6 em investigations/).
+if [ -n "$siblings" ]; then
+  IFS=',' read -r -a orphan_names <<< "$siblings"
+  for orphan in "${orphan_names[@]}"; do
+    [ -n "$orphan" ] || continue
+    echo "::warning::A release $TAG já tem o asset de arte '$orphan' e este run publica '$IMAGE_ASSET_NAME'."
+    echo "::warning::'$orphan' fica órfão: nada no corpo o referencia. Se foi superado pela arte atual, remova com:"
+    echo "::warning::  gh release delete-asset $TAG $orphan --repo $REPO --yes"
+  done
 fi
 
 # "Já publicado" precisa de duas condições: existe asset com esse nome e o

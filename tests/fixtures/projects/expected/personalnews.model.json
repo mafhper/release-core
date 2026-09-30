@@ -1,0 +1,64 @@
+{
+  "release": {
+    "title": "Personal News",
+    "tagline": "Reune seus feeds, podcasts e videos em uma experiencia de leitura local e personalizavel.",
+    "language": "pt-BR",
+    "notesGranularity": "minor",
+    "imagePath": "docs/images/releases/release.webp",
+    "imageRequired": true,
+    "imageGranularity": "minor",
+    "imageDir": "docs/images/releases",
+    "imagePrefix": "release",
+    "imageExt": ".webp",
+    "imageUpload": true,
+    "imageAllowCorrection": true,
+    "imageCorrectionSuffix": "-new",
+    "imageTitleInBody": false,
+    "imageReuse": "forbid",
+    "imageChanges": [],
+    "usage": "## Instalacao\n\n| Sistema | Arquivo recomendado |\n| --- | --- |",
+    "extra": ""
+  },
+  "build": {
+    "packageManager": "bun",
+    "node": "20",
+    "bun": "1.x",
+    "rust": "stable",
+    "workingDirectory": ".",
+    "apt": [
+      "libwebkit2gtk-4.1-dev",
+      "libayatana-appindicator3-dev",
+      "librsvg2-dev",
+      "patchelf"
+    ],
+    "gates": [
+      "bun run desktop:installer-assets:check"
+    ],
+    "pre": [
+      "node scripts/prepare-backend.mjs"
+    ],
+    "command": ""
+  },
+  "desktop": {
+    "enabled": true,
+    "projectPath": "apps/desktop"
+  },
+  "distribution": {
+    "artifacts": [],
+    "downloadsTable": false
+  },
+  "versions": {
+    "files": [
+      {
+        "path": "apps/desktop/src-tauri/tauri.conf.json",
+        "format": "json",
+        "field": "version"
+      },
+      {
+        "path": "apps/desktop/src-tauri/Cargo.toml",
+        "format": "toml",
+        "field": "package.version"
+      }
+    ]
+  }
+}

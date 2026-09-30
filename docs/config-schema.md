@@ -17,7 +17,12 @@ O contrato é pequeno, declarativo e validado pelo helper `scripts/release-confi
       "upload": true,                      // opcional: anexa a arte como asset da release
       "allow_correction": true,            // opcional: aceita <arquivo>-new do branch padrão
       "correction_suffix": "-new",         // opcional
-      "title_in_body": true                // opcional: H1 com o nome no corpo (ver abaixo)
+      "title_in_body": true,               // opcional: H1 com o nome no corpo (ver abaixo)
+      "reuse": "forbid",                   // opcional: "forbid" | "allow" (ver "Trocar a arte")
+      "changes": [                         // opcional: eras de arte (ver "Trocar a arte")
+        { "from": "v1.0.0", "file": "release-v1.0.webp" },
+        { "from": "v1.2.3", "file": "release-v1.2.3.webp" }
+      ]
     },
     "notes": { "granularity": "tag" },     // "tag" | "minor"
     "sections": {
@@ -40,7 +45,24 @@ O contrato é pequeno, declarativo e validado pelo helper `scripts/release-confi
     "enabled": false,                      // ativa tauri-action
     "project_path": "."                    // raiz do projeto Tauri
   },
-  "artifact": {
+  "distribution": {
+    "downloads_table": false,              // gera a seção "## Downloads" no corpo
+    "artifacts": [
+      {
+        "id": "web",                       // obrigatório, único, slug
+        "path": "dist/site.zip",           // ou "globs": ["bundle/**/*.msi"]
+        "kind": "archive",                 // rótulo livre (aparece na tabela)
+        "os": ["ubuntu-latest"],           // células que o produzem; "*" = todas
+        "required": false,                 // ausente e obrigatório reprova
+        "label": "Web (portátil)",         // rótulo na tabela de downloads
+        "platform": "web",                 // metadado para a tabela
+        "architecture": "x64",             // metadado para a tabela
+        "release_name": "app-{version}.zip",// opcional; exige exatamente 1 arquivo
+        "validate": ["unzip -t \"$1\""]    // opcional; roda em bash, arquivo em $1
+      }
+    ]
+  },
+  "artifact": {                            // forma antiga; não misturar com a de cima
     "enabled": false,
     "path": "dist/app.zip",                // string ou array (0..N)
     "globs": ["dist/artifacts/*.zip"],     // opcional (padrões glob)
@@ -71,25 +93,128 @@ O contrato é pequeno, declarativo e validado pelo helper `scripts/release-confi
 | `release.image.allow_correction` | `true` |
 | `release.image.correction_suffix` | `-new` |
 | `release.image.title_in_body` | `true` |
+| `release.image.reuse` | `forbid` |
+| `release.image.changes` | `[]` |
 | `release.notes.granularity` | `tag` |
 | `build.node` | `22` se `package_manager` for `npm`; senão vazio |
 | `build.working_directory` | `.` (raiz do repositório) |
 | `desktop.project_path` | `.` |
+| `distribution.artifacts` | `[]` (o bloco `artifact` legado é normalizado para uma entrada) |
+| `distribution.downloads_table` | `false` |
 | `artifact.path` / `globs` / `validate` | `[]` |
 | `versions.files` | `[]` |
 
 ## Regras de validação (falham antes do build)
 
 - `release.title` é obrigatório (não vazio).
-- `language`, `notes.granularity`, `image.granularity` são enums.
+- `language`, `notes.granularity`, `image.granularity`, `image.reuse` são enums.
 - `image.path` é um arquivo (formato legado) ou um diretório; com diretório, `image.ext` precisa começar com ponto.
 - `image.upload`, `image.allow_correction`, `image.title_in_body` são booleanos; `image.correction_suffix` é string não vazia.
+- `image.changes` é um array de `{ from, file }`: `from` é uma tag **completa** `vX.Y.Z` e único na lista; `file` é um nome de arquivo dentro de `image.path` (sem barra, sem ponto inicial).
 - `package_manager` exige evidência: `bun` → `bun.lock`/`bun.lockb`; `npm` → `package-lock.json`. O valor de `package.json#packageManager` deve ser coerente.
 - `bun` declarado exige `package_manager: "bun"`; `npm` exige `node` com versão.
 - `build.working_directory` deve ser um caminho relativo à raiz do repositório.
-- `desktop: true` exige `build.rust`, proíbe `build.command` e `artifact.enabled`.
-- `artifact.enabled` exige pelo menos um `path`/`globs`; `globs` deve ser um padrão glob.
-- `version.files` requer `{ path, format: json|toml, field }`.
+- `desktop: true` exige `build.rust`. **Não** restringe `build.command` nem `distribution.artifacts` — o perfil misto (site **e** instaladores) é declarado, não proibido.
+- `distribution.artifacts` é um array de `{ id, path|globs, os, required, kind, label, platform, architecture, release_name, validate }`. `id` é slug único; `path` e `globs` não podem ser ambos vazios; `os` padrão é `["*"]`; `required` padrão é `true`.
+- `distribution.artifacts` e o bloco `artifact` **não podem ser declarados juntos** — a mensagem de erro entrega a migração.
+- `release_name` exige exatamente um arquivo por artefato.
+- `versions.files` requer `{ path, format: json|toml, field }`.
+
+## Distribuição
+
+O que o projeto entrega é uma **lista de artefatos**, e cada um declara a que
+célula da matriz o produz. O bloco `artifact` legado é a mesma coisa sem
+escopo: ele é normalizado para uma entrada com `os: ["*"]` e `required: true`,
+que é exatamente o comportamento de sempre.
+
+### `os`: a célula da matriz
+
+Sem `os`, um artefato é exigido em **toda** célula — e com matriz isso é
+impossível de declarar, porque cada artefato é produzido por uma só. `os` casa
+com o `os` da célula do `matrix`:
+
+```yaml
+matrix: '[{"os":"ubuntu-latest"},{"os":"windows-latest"}]'
+```
+
+```jsonc
+"os": ["windows-latest"]   // só a célula do Windows coleta e publica
+"os": ["*"]                // qualquer célula
+```
+
+### `required`: obrigatório de verdade
+
+Ausente e `required: true` **reprova a célula**. Ausente e `required: false`
+avisa e segue. Arquivo vazio é erro nos dois casos: ausente é "não produzido
+agora", vazio é "produzido quebrado", e são estados diferentes.
+
+### O perfil misto: site **e** instaladores
+
+`desktop.enabled` convive com `build.command` e com
+`distribution.artifacts`. A ordem no `build` é: dependências → `gates` →
+`pre` → `build.command` → `tauri-action` → artefatos declarados.
+
+```jsonc
+"build": { "command": "npm run build:web" },
+"desktop": { "enabled": true, "project_path": "apps/desktop" },
+"distribution": {
+  "artifacts": [
+    { "id": "web", "path": "dist/site.zip", "kind": "archive",
+      "os": ["ubuntu-latest"], "required": false, "label": "Web", "platform": "web" }
+  ]
+}
+```
+
+O `tauri-action` publica os instaladores; o Core publica o artefato próprio do
+projeto. Uma release pode ter os dois.
+
+### O que a célula promete: `matrix[].expect`
+
+`build` verde afirma algo sobre **células**. O que a célula entregou é outra
+pergunta, e ela é respondida por `expect`:
+
+```yaml
+matrix: '[{"os":"windows-latest","expect":"[\"**/*.msi\",\"**/*.exe\"]"}]'
+```
+
+Globs, não nomes exatos, porque o nome do instalador carrega a versão
+(`App_1.5.0_x64_en-US.msi`) e muda a cada release. O que a célula promete é a
+**forma** do que ela gera, e essa é a afirmação estável. Se nenhum arquivo casar
+depois do build, a célula reprova — que é a diferença entre "o build passou" e
+"o artefato existe".
+
+### Célula opcional: `matrix[].optional`
+
+```yaml
+matrix: '[{"os":"macos-latest","optional":true}]'
+```
+
+A célula passa a ter `continue-on-error`. Use quando a plataforma é instável e o
+produto é melhor sem ela do que atrasado por causa dela. Os artefatos
+**obrigatórios** que só ela produz precisam de `required: false`, senão a
+célula reprova antes de a optionalidade valer.
+
+### A conferência da release: no `finalize`
+
+Todo artefato com `required: true` **e** `release_name` precisa aparecer na
+release. A conferência roda no `finalize`, que é o único lugar que enxerga a
+release inteira: `build` verde não afirma nada sobre a release, só sobre
+células. Quem reprova aqui deixa o release em **rascunho**, sem publicar.
+
+O que não tem nome determinístico — o que o `tauri-action` gera — é conferido
+pelo `expect` da célula, e a conferência diz isso no log em vez de fingir que
+confirmou.
+
+### Tabela de downloads
+
+`distribution.downloads_table: true` acrescenta uma seção `## Downloads` ao
+corpo, montada a partir dos assets **publicados** — nunca do que foi apenas
+declarado. Um artefato opcional que não apareceu não vira linha apontando para
+arquivo inexistente.
+
+A alternativa era escrever a tabela à mão em `sections.usage`, e ela já
+divergiu do nome real gerado pelo Tauri uma vez: o link do `.rpm` deu 404 e
+ninguém viu.
 
 ## Diretório de trabalho (`build.working_directory`)
 
@@ -126,10 +251,79 @@ v1.0.1 → pode reutilizar a linha v1.0
 v1.1.0 → deve mudar (hard gate)
 ```
 
-Com `granularity: "tag"`, a mudança é exigida a cada versão. O Core compara a
-arte resolvida com a da `prev_tag` (maior semver < atual), nunca com release
-histórica qualquer. Uma correção (`-new`) não passa por esse gate: ela não
-está no histórico entre as duas tags.
+Com `granularity: "tag"`, a mudança é exigida a cada versão. Uma era declarada
+que começa na tag também conta como troca exigida (ver abaixo).
+
+### Trocar a arte: dentro da linha, e de propósito
+
+A política acima responde *quando* a arte muda. Duas chaves respondem *como* você
+declara a troca, porque "quando" e "como" são decisões diferentes.
+
+**`image.changes[]` — as eras da arte.** A lista de pontos em que a arte muda de
+propósito:
+
+```jsonc
+"image": {
+  "path": "docs/images/releases",
+  "changes": [
+    { "from": "v1.0.0", "file": "release-v1.0.webp" },
+    { "from": "v1.2.3", "file": "release-v1.2.3.webp" }
+  ]
+}
+```
+
+Para a tag `v1.2.3` e todas as seguintes até a próxima entrada, a arte é
+`release-v1.2.3.webp`. Sem a chave, a resolução é a da tabela acima, por nome de
+arquivo — **e nada muda para quem já tem config publicado**.
+
+Isso resolve um problema que o modelo por nome não tinha como resolver. Um
+arquivo `release-v1.2.3.webp` serve **só** a `v1.2.3`: a `v1.2.4` volta ao
+arquivo da linha e mostra a arte anterior, sem aviso. Com a lista, a intenção
+"vale da v1.2.3 em diante" vira uma linha de diff revisável, versionada junto
+com a tag. E o arquivo da linha volta a significar a linha.
+
+Quando existe a lista, ela é a autoridade: um arquivo por tag que **não** está
+declarado é ignorado na resolução, e o Core avisa:
+
+```
+::warning::docs/images/releases/release-v1.2.3.webp existe na tag, mas nenhuma
+era em image.changes[] declara esse arquivo. Ele serve SÓ a v1.2.3: a próxima tag
+da linha 1.2 volta a procurar a arte anterior.
+```
+
+`from` precisa ser uma tag completa `vX.Y.Z` porque a era precisa de um ponto de
+partida inequívoco. Tag de prerelease (`v1.2.0-rc1`) usa a era da versão base.
+
+**`image.reuse` — reusar de propósito.** Entrar numa linha nova sem arte nova é
+uma decisão legítima de quem produz a arte, e não uma falha do Core. Com
+`"reuse": "allow"`, o Core não cobra a troca: ele registra no log que a arte é
+byte a byte a da tag anterior e que isso foi declarado. O padrão `"forbid"`
+mantém a cobrança.
+
+### O que o gate da arte realmente compara
+
+O gate pergunta **se os bytes mudaram**, e não se o nome do arquivo mudou. A
+comparação é feita entre o blob da arte em `HEAD` e o blob da arte na `prev_tag`,
+lidos do object database do git — nunca do arquivo em disco, porque o checkout
+normaliza fim de linha e isso já custou uma release inteira uma vez.
+
+O que segue é o que a política exige nesta tag:
+
+| Situação | Comportamento |
+|---|---|
+| arte ausente, `required: true` | **falha**, com o motivo (inclusive quando uma era declara um arquivo ausente) |
+| arte ausente, `required: false` | segue sem imagem, e diz que seguiu |
+| mesma linha `major.minor` | não exige nada |
+| linha nova, bytes diferentes | troca aceita, com os dois digests no log |
+| linha nova, bytes **iguais** | `reuse: "forbid"` → **aviso** com os digests; `reuse: "allow"` → aviso de reuso declarado |
+| `granularity: "tag"` | exige troca em toda tag |
+| arte vinda do branch padrão (correção `-new`) | troca declarada por construção; **não** reprova |
+| era declarada que começa nesta tag | exige troca, conferida por conteúdo |
+
+A regra de conteúdo é **aviso** na série `1.x` e vira **erro** na `2.0.0` quando
+`reuse: "forbid"`. Assim ninguém tem uma release publicada pelo gate antigo
+reprovando de repente, e a política anunciada para o `2.0` é a mesma que vale
+hoje.
 
 ### `image.path`: arquivo (legado) ou diretório
 
@@ -197,3 +391,12 @@ O `-new` é a forma **recomendada** porque deixa a intenção explícita, manté
 arte original e a corrigida lado a lado no repositório, e o padrão fica legível
 por quem abre o repositório. Use `image.allow_correction: false` para desligar
 as duas formas.
+
+### Asset antigo quando o nome do asset muda
+
+O asset publicado usa o nome canônico do arquivo resolvido. Quando a resolução
+vem do arquivo de uma **correção** feita numa tag cuja arte vinha da linha, esse
+nome muda (`release-v1.2.webp` → `release-v1.2.3.webp`) e o asset anterior fica
+ao lado do novo. A guarda por `digest` compara com o asset de mesmo nome, então
+não enxerga o anterior: por isso o Core avisa, com o comando de remoção, em vez
+de deixar o asset órfão passar em silêncio.

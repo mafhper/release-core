@@ -1,0 +1,75 @@
+{
+  "release": {
+    "title": "Kaes Keid Inspector",
+    "tagline": "The definitive CSS/HTML & Technology Stack Inspector - free & open source.",
+    "language": "en",
+    "notesGranularity": "tag",
+    "imagePath": "docs/images/releases/release.webp",
+    "imageRequired": true,
+    "imageGranularity": "minor",
+    "imageDir": "docs/images/releases",
+    "imagePrefix": "release",
+    "imageExt": ".webp",
+    "imageUpload": true,
+    "imageAllowCorrection": true,
+    "imageCorrectionSuffix": "-new",
+    "imageTitleInBody": true,
+    "imageReuse": "forbid",
+    "imageChanges": [],
+    "usage": "## Installation\n\n1. Download the archive from the assets of this Release.\n2. Extract the archive into a local folder.",
+    "extra": "## Other installation details\n\nThe published archive contains the compiled content of `dist/` directly."
+  },
+  "build": {
+    "packageManager": "npm",
+    "node": "22",
+    "bun": "",
+    "rust": "",
+    "workingDirectory": ".",
+    "apt": [],
+    "gates": [
+      "npm run lint",
+      "npm test"
+    ],
+    "pre": [],
+    "command": "npm run build"
+  },
+  "desktop": {
+    "enabled": false,
+    "projectPath": "."
+  },
+  "distribution": {
+    "artifacts": [
+      {
+        "id": "artifact",
+        "paths": [
+          "kaes-keid-inspector.zip"
+        ],
+        "globs": [],
+        "os": [
+          "*"
+        ],
+        "required": true,
+        "kind": "",
+        "label": "",
+        "platform": "",
+        "architecture": "",
+        "releaseName": "kaes-keide-inspector-v{version}.zip",
+        "validate": [
+          "unzip -t \"$1\"",
+          "unzip -l \"$1\" | grep -q 'manifest.json'",
+          "! unzip -l \"$1\" | grep -q 'node_modules/'"
+        ]
+      }
+    ],
+    "downloadsTable": false
+  },
+  "versions": {
+    "files": [
+      {
+        "path": "manifest.json",
+        "format": "json",
+        "field": "version"
+      }
+    ]
+  }
+}

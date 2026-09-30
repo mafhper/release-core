@@ -1,0 +1,68 @@
+{
+  "release": {
+    "title": "Mark-Lee",
+    "tagline": "Reune um editor Markdown elegante e um espaco local-first de Memorias sobre os mesmos arquivos.",
+    "language": "pt-BR",
+    "notesGranularity": "minor",
+    "imagePath": "docs/images/releases",
+    "imageRequired": true,
+    "imageGranularity": "minor",
+    "imageDir": "docs/images/releases",
+    "imagePrefix": "release",
+    "imageExt": ".webp",
+    "imageUpload": true,
+    "imageAllowCorrection": true,
+    "imageCorrectionSuffix": "-new",
+    "imageTitleInBody": true,
+    "imageReuse": "forbid",
+    "imageChanges": [],
+    "usage": "",
+    "extra": ""
+  },
+  "build": {
+    "packageManager": "npm",
+    "node": "22.22.0",
+    "bun": "",
+    "rust": "stable",
+    "workingDirectory": ".",
+    "apt": [
+      "libglib2.0-dev",
+      "libgtk-3-dev",
+      "libwebkit2gtk-4.1-dev",
+      "libjavascriptcoregtk-4.1-dev",
+      "libappindicator3-dev",
+      "librsvg2-dev",
+      "patchelf"
+    ],
+    "gates": [],
+    "pre": [],
+    "command": ""
+  },
+  "desktop": {
+    "enabled": true,
+    "projectPath": "."
+  },
+  "distribution": {
+    "artifacts": [],
+    "downloadsTable": false
+  },
+  "versions": {
+    "files": [
+      {
+        "path": "package.json",
+        "format": "json",
+        "field": "version"
+      },
+      {
+        "path": "src-tauri/tauri.conf.json",
+        "format": "json",
+        "field": "version"
+      },
+      {
+        "path": "src-tauri/Cargo.toml",
+        "format": "toml",
+        "field": "package.version"
+      }
+    ]
+  }
+}

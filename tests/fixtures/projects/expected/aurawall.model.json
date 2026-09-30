@@ -1,0 +1,48 @@
+{
+  "release": {
+    "title": "AuraWall",
+    "tagline": "Abstract wallpaper generator - vector-first, exports high-resolution JPG/PNG, no backend.",
+    "language": "en",
+    "notesGranularity": "tag",
+    "imagePath": "docs/images/releases",
+    "imageRequired": true,
+    "imageGranularity": "minor",
+    "imageDir": "docs/images/releases",
+    "imagePrefix": "release",
+    "imageExt": ".webp",
+    "imageUpload": true,
+    "imageAllowCorrection": true,
+    "imageCorrectionSuffix": "-new",
+    "imageTitleInBody": false,
+    "imageReuse": "forbid",
+    "imageChanges": [],
+    "usage": "## Usage\n\nLive site: **[mafhper.github.io/aurawall](https://mafhper.github.io/aurawall)**",
+    "extra": "## Release policy\n\nThis project ships **no distribution artifact**. The site is a static build, and its build output is the deploy's business, not a release asset."
+  },
+  "build": {
+    "packageManager": "npm",
+    "node": "22",
+    "bun": "",
+    "rust": "",
+    "workingDirectory": ".",
+    "apt": [],
+    "gates": [
+      "npm run lint",
+      "npm run type-check",
+      "npm test"
+    ],
+    "pre": [],
+    "command": "npm run build:dist && npm run test:perf"
+  },
+  "desktop": {
+    "enabled": false,
+    "projectPath": "."
+  },
+  "distribution": {
+    "artifacts": [],
+    "downloadsTable": false
+  },
+  "versions": {
+    "files": []
+  }
+}

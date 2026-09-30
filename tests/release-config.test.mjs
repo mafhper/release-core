@@ -141,8 +141,6 @@ const FAIL_CASES = [
   ["artifact sem path/globs", () => tempConfig(JSON.stringify({ release: { title: "X" }, artifact: { enabled: true } })).file, /artif.*enabled está ativo/],
   ["globs não é glob", () => tempConfig(JSON.stringify({ release: { title: "X" }, artifact: { enabled: true, globs: ["dist/arquivo.txt"] } })).file, /glob/],
   ["desktop sem rust", () => tempConfig(JSON.stringify({ release: { title: "X" }, desktop: { enabled: true } })).file, /desktop\.enabled é true, mas build\.rust/],
-  ["desktop com build.command", () => tempConfig(JSON.stringify({ release: { title: "X" }, desktop: { enabled: true }, build: { rust: "stable", command: "bun run x" } })).file, /não permite build\.command/],
-  ["desktop com artifact", () => tempConfig(JSON.stringify({ release: { title: "X" }, desktop: { enabled: true }, build: { rust: "stable" }, artifact: { enabled: true, path: "a.zip" } })).file, /artifact\.enabled não pode ser true com desktop/],
   ["versions.files inválido (string)", () => tempConfig(JSON.stringify({ release: { title: "X" }, versions: { files: ["manifest.json"] } })).file, /deve ser \{ path, format, field \}/],
   ["versions.files campo ausente", () => tempConfig(JSON.stringify({ release: { title: "X" }, versions: { files: [{ path: "a.json", format: "json" }] } })).file, /versions\.files\[\]\.field/],
   ["versions.files format inválido", () => tempConfig(JSON.stringify({ release: { title: "X" }, versions: { files: [{ path: "a.yml", format: "yaml", field: "x" }] } })).file, /format deve ser "json" ou "toml"/],
@@ -161,3 +159,50 @@ for (const [label, make, pattern] of FAIL_CASES) {
     assert.match(res.stderr, /\[release-config\]/);
   });
 }
+
+// Casos que **deixaram** de reprovar, e por quê.
+//
+// Estas três regras saíram quando a distribuição virou uma lista com escopo. Elas
+// proibiam exatamente o perfil que o portfólio tem: site público e instaladores
+// na mesma release. Um consumidor que nunca tentou nunca teria registrado a dor —
+// a regra só aparece lendo o código, e por isso viraram teste positivo: uma
+// proibição que ninguém exercitou também não tem teste que prove que ela voltou.
+test("desktop com build.command é permitido: o build não-desktop roda junto do Tauri", () => {
+  const file = tempConfig(
+    JSON.stringify({
+      release: { title: "X" },
+      desktop: { enabled: true },
+      build: { rust: "stable", command: "npm run build:web", apt: ["libgtk-3-dev"] },
+    }),
+  ).file;
+  const res = run(file);
+  assertOk(res);
+  assert.equal(run(file, ["--get", "command"]).stdout.trim(), "npm run build:web");
+});
+
+test("desktop com artifact é permitido: o perfil misto é declarável", () => {
+  const file = tempConfig(
+    JSON.stringify({
+      release: { title: "X" },
+      desktop: { enabled: true },
+      build: { rust: "stable", apt: ["libgtk-3-dev"] },
+      artifact: { enabled: true, path: "dist/site.zip" },
+    }),
+  ).file;
+  const res = run(file);
+  assertOk(res);
+  assert.equal(run(file, ["--get", "artifact_enabled"]).stdout.trim(), "true");
+});
+
+test("as duas formas de artefato juntas ainda é erro, com a migração no texto", () => {
+  const file = tempConfig(
+    JSON.stringify({
+      release: { title: "X" },
+      artifact: { enabled: true, path: "a.zip" },
+      distribution: { artifacts: [{ id: "a", path: "a.zip" }] },
+    }),
+  ).file;
+  const res = run(file);
+  assert.notEqual(res.status, 0);
+  assert.match(res.stderr, /não podem ser declarados juntos/);
+});
