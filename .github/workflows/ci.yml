@@ -209,10 +209,9 @@ jobs:
             while IFS= read -r line || [ -n "$line" ]; do
               case "$line" in
                 *'<<'*) marker="${line#*<<}"; key="${line%%<<*}"; value="";;
-                "$marker") if [ -n "$marker" ]; then marker=""; export "$key=$value"; fi ;;
-                "") ;;
-                *=*) if [ -z "$marker" ]; then export "${line%%=*}=${line#*=}"; fi ;;
-                *) if [ -n "$marker" ]; then value="${value:+$value$'\n'}$line"; fi ;;
+                "$marker") [ -n "$marker" ] && { marker=""; export "$key=$value"; }; continue ;;
+                *=*) [ -z "$marker" ] && export "${line%%=*}=${line#*=}"; continue ;;
+                *) [ -n "$marker" ] && value="${value:+$value$'\n'}$line"; continue ;;
               esac
             done < "$1"
           }
@@ -258,8 +257,14 @@ jobs:
           node "$TOOLS_DIR/scripts/collect-artifacts.mjs"
           # a celula do Windows coleta o MSI dela e ignora web e mac
           grep -q 'Demo-1.4.0-x64.msi' "$ARTIFACT_OUT"
-          ! grep -q 'site.zip' "$ARTIFACT_OUT"
-          ! grep -q 'dmg' "$ARTIFACT_OUT"
+          # `! grep` fora de condicao e armadilha com errexit (SC2251): o que
+          # reprova aqui e a presenca do que NAO devia ter sido coletado.
+          if grep -q 'site.zip' "$ARTIFACT_OUT"; then
+            echo "a celula do Windows nao deveria coletar o artefato do site"; exit 1
+          fi
+          if grep -q 'dmg' "$ARTIFACT_OUT"; then
+            echo "a celula do Windows nao deveria coletar o artefato do macOS"; exit 1
+          fi
           # a celula do macOS so tem artefato opcional, que nao existe: passa
           ARTIFACT_CELL_OS=macos-latest ARTIFACT_OUT="$tmp/collected-mac.txt" \
             node "$TOOLS_DIR/scripts/collect-artifacts.mjs"

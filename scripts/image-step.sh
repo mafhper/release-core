@@ -183,7 +183,9 @@ fi
 # de cena em silêncio e o dono só descobre olhando a release — foi o que aconteceu
 # no aurawall, que apagou o asset a mão (achado E6 em investigations/).
 if [ -n "$siblings" ]; then
-  for orphan in ${siblings//,/ }; do
+  IFS=',' read -r -a orphan_names <<< "$siblings"
+  for orphan in "${orphan_names[@]}"; do
+    [ -n "$orphan" ] || continue
     echo "::warning::A release $TAG já tem o asset de arte '$orphan' e este run publica '$IMAGE_ASSET_NAME'."
     echo "::warning::'$orphan' fica órfão: nada no corpo o referencia. Se foi superado pela arte atual, remova com:"
     echo "::warning::  gh release delete-asset $TAG $orphan --repo $REPO --yes"
