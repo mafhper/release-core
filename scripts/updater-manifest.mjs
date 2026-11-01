@@ -485,8 +485,12 @@ export function listReleases(repo, env = process.env) {
  * `RELEASES_JSON`. Fora dela, o conteúdo vem do asset da release (a API do asset
  * responde em rascunho; listar por tag, não), que é a fonte de verdade do que o
  * cliente vai baixar.
+ *
+ * `Accept: application/octet-stream` é o que faz a API devolver os **bytes** do
+ * asset; sem ele a resposta é o JSON do asset, e o manifesto publicaria metadata
+ * onde o cliente espera a assinatura.
  */
-export function readSignatureContents(chosen, env = process.env) {
+export function readSignatureContents(chosen, env = process.env, exec = execFileSync) {
   const raw = env.UPDATER_SIG_JSON;
   if (raw !== undefined && String(raw).trim() !== "") {
     try {
@@ -502,7 +506,7 @@ export function readSignatureContents(chosen, env = process.env) {
         `asset "${asset.name}" veio sem id: sem ele não há como baixar o conteúdo da assinatura.`,
       );
     }
-    contents[asset.name] = execFileSync(
+    contents[asset.name] = exec(
       "gh",
       ["api", `repos/${env.REPO}/releases/assets/${asset.id}`, "-H", "Accept: application/octet-stream"],
       { encoding: "utf8" },

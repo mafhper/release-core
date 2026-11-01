@@ -28,6 +28,7 @@ import {
   immutableAssetUrl,
   notesPath,
   parseSemver,
+  readSignatureContents,
   servedChannelReleases,
   signatureAssetFor,
 } from "../scripts/updater-manifest.mjs";
@@ -480,6 +481,37 @@ test("CLI: entrada de ambiente quebrada reprova em vez de virar manifesto plaus�
   const releaseAusente = runCli({ UPDATER_MANIFEST_OUT: outDir(), TAG: "v9.9.9" });
   assert.equal(releaseAusente.status, 1);
   assert.match(releaseAusente.stderr, /release não encontrada para a tag v9\.9\.9/);
+});
+
+test("o conteúdo da assinatura vem do asset da release, pela API que responde em rascunho", () => {
+  // O `-H Accept: application/octet-stream` não é decorativo: sem ele a API
+  // devolve o JSON do asset, e o manifesto publicaria metadata no lugar da
+  // assinatura. É por isso que a forma da chamada é conferida aqui, e não só a
+  // mensagem de erro.
+  const calls = [];
+  const exec = (command, args) => {
+    calls.push([command, ...args]);
+    return "assinatura-do-asset\n";
+  };
+  const contents = readSignatureContents(
+    [
+      { name: "a.sig", id: 7 },
+      { name: "b.sig", id: 8 },
+    ],
+    { REPO: "mafhper/demo" },
+    exec,
+  );
+
+  assert.deepEqual(calls, [
+    ["gh", "api", "repos/mafhper/demo/releases/assets/7", "-H", "Accept: application/octet-stream"],
+    ["gh", "api", "repos/mafhper/demo/releases/assets/8", "-H", "Accept: application/octet-stream"],
+  ]);
+  assert.deepEqual(Object.keys(contents), ["a.sig", "b.sig"]);
+
+  assert.throws(
+    () => readSignatureContents([{ name: "sem-id.sig" }], { REPO: "mafhper/demo" }, exec),
+    /veio sem id/,
+  );
 });
 
 // --- o passo do workflow -----------------------------------------------------
