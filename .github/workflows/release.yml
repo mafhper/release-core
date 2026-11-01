@@ -480,6 +480,35 @@ jobs:
         if: env.UPDATER_ENABLED == 'true'
         run: node "$RUNNER_TEMP/.release-tools/scripts/updater-signatures.mjs" verify
 
+      - name: Gerar e publicar o manifesto do canal
+        # O feed do updater: `latest.json` no stable, `latest-beta.json` no beta.
+        # Depois da conferência das assinaturas (ele lê o `.sig` que ela aprovou) e
+        # antes de publicar o release, para o asset existir no instante em que a
+        # release deixa de ser rascunho.
+        #
+        # O script imprime em stdout o caminho do manifesto **só** quando o canal
+        # avança. Saída vazia é a resposta "não promove": downgrade, por exemplo,
+        # publica o release (pode ser hotfix de linha antiga) e não move o feed.
+        if: env.UPDATER_ENABLED == 'true'
+        env:
+          UPDATER_MANIFEST_OUT: ${{ runner.temp }}/updater-manifest
+        run: |
+          manifest="$(node "$RUNNER_TEMP/.release-tools/scripts/updater-manifest.mjs" build)"
+          if [ -z "$manifest" ]; then
+            echo "Manifesto do canal $UPDATER_CHANNEL não publicado: o gate não aprovou a promoção (ver acima)."
+            exit 0
+          fi
+          attempt=1
+          until gh release upload "$TAG" --repo "$REPO" --clobber "$manifest"; do
+            if [ "$attempt" -ge 3 ]; then
+              echo "::error::Falha ao enviar o manifesto após $attempt tentativas."; exit 1
+            fi
+            echo "Reenviando o manifesto (tentativa $((attempt + 1)))..."
+            attempt=$((attempt + 1))
+            sleep 5
+          done
+          echo "Manifesto do canal $UPDATER_CHANNEL publicado: $(basename "$manifest")"
+
       - name: Publicar a arte de release
         env:
           DEFAULT_BRANCH: ${{ github.event.repository.default_branch }}

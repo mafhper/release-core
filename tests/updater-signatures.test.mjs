@@ -215,9 +215,12 @@ function stepBlocks() {
 
 test("todo passo que toca o updater tem a guarda UPDATER_ENABLED", () => {
   const tocados = stepBlocks().filter(
-    (block) => block.includes("updater-signatures.mjs") || block.includes("TAURI_SIGNING_"),
+    (block) =>
+      block.includes("updater-signatures.mjs") ||
+      block.includes("updater-manifest.mjs") ||
+      block.includes("TAURI_SIGNING_"),
   );
-  assert.ok(tocados.length >= 3, "esperava o preparo da chave, a coleta e a conferência");
+  assert.ok(tocados.length >= 4, "esperava o preparo da chave, a coleta, a conferência e o manifesto");
   for (const block of tocados) {
     const name = block.split("\n")[0];
     assert.match(block, /\n\s+if: env\.UPDATER_ENABLED == 'true'/, `${name} sem guarda do updater`);

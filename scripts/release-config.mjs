@@ -158,9 +158,9 @@ function osDefault(value, at) {
  *
  * `enabled` tem default `true` **dentro** do bloco porque declarar o bloco já é
  * a decisão; `false` existe para desligar sem apagar a declaração (staging da
- * config antes dos segredos existirem). `channel` é declarado agora e inerte
- * até o manifesto por canal existir: o lote seguinte o consome, e hoje ele só
- * valida o valor e aparece no log.
+ * config antes dos segredos existirem). `channel` decide em que asset o
+ * manifesto é publicado (`latest.json` no stable, `latest-beta.json` no beta) e
+ * se uma tag prerelease pode entrar no feed — não é mais um valor só de log.
  */
 function normalizeUpdater(raw, desktopEnabled) {
   if (typeof raw !== "object" || raw === null || Array.isArray(raw)) {
