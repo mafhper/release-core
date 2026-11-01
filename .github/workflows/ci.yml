@@ -303,6 +303,78 @@ jobs:
           grep -q '## Downloads' "$tmp/body.md"
           grep -q 'Windows | windows · x64' "$tmp/body.md"
 
+      - name: Smoke test do manifesto por canal
+        run: |
+          # O manifesto é o feed. O que este smoke prova é o mecanismo que o
+          # `finalize` usa de verdade: o `.sig` baixado do **asset da release**
+          # (a API responde em rascunho; listar por tag, nao), o caminho do
+          # manifesto em stdout como sinal de "o canal avanca", e a recusa nos
+          # tres casos que importam — feed incompleto, downgrade e prerelease no
+          # canal stable.
+          tmp="$(mktemp -d)"
+          mkdir -p "$tmp/proj/.github/release-notes" "$tmp/stub"
+          printf 'instalador' > "$tmp/proj/App_1.5.0_x64-setup.exe"
+          printf 'assinatura-win' > "$tmp/proj/App_1.5.0_x64-setup.exe.sig"
+          printf 'app' > "$tmp/proj/App_1.5.0_aarch64.app.tar.gz"
+          printf 'assinatura-mac' > "$tmp/proj/App_1.5.0_aarch64.app.tar.gz.sig"
+          printf 'Notas da 1.5.0.' > "$tmp/proj/.github/release-notes/v1.5.0.md"
+          cat > "$tmp/stub/gh" <<'STUB'
+          #!/usr/bin/env bash
+          case "$1 $2" in
+            "api repos/mafhper/demo/releases?per_page=100") cat "$GH_STUB_RELEASES" ;;
+            "api repos/mafhper/demo/releases/assets/1") cat "$GH_STUB_SIG_WIN" ;;
+            "api repos/mafhper/demo/releases/assets/2") cat "$GH_STUB_SIG_MAC" ;;
+            "release upload") echo "$@" >> "$GH_STUB_UPLOADS" ;;
+            *) echo "gh nao esperado: $*" >&2; exit 1 ;;
+          esac
+          STUB
+          chmod +x "$tmp/stub/gh"
+          export PATH="$tmp/stub:$PATH"
+          export GH_STUB_UPLOADS="$tmp/uploads.txt" GH_STUB_RELEASES="$tmp/r.json"
+          export GH_STUB_SIG_WIN="$tmp/proj/App_1.5.0_x64-setup.exe.sig"
+          export GH_STUB_SIG_MAC="$tmp/proj/App_1.5.0_aarch64.app.tar.gz.sig"
+          export REPO=mafhper/demo UPDATER_PUB_DATE=2026-11-01T00:00:00.000Z
+          export NOTES_DIR="$tmp/proj/.github/release-notes"
+          export UPDATER_PLATFORMS='[{"id":"windows-x86_64","os":["windows-latest"],"sig":["bundle/nsis/*x64-setup.exe.sig"]},{"id":"darwin-aarch64","os":["macos-latest"],"sig":["bundle/macos/*.app.tar.gz.sig"]}]'
+          win='{"name":"App_1.5.0_x64-setup.exe","id":10}'
+          winsig='{"name":"App_1.5.0_x64-setup.exe.sig","id":1}'
+          mac='{"name":"App_1.5.0_aarch64.app.tar.gz","id":11}'
+          macsig='{"name":"App_1.5.0_aarch64.app.tar.gz.sig","id":2}'
+          full="[$win,$winsig,$mac,$macsig]"
+          manifest="$tmp/manifest"
+          export UPDATER_MANIFEST_OUT="$manifest" TAG=v1.5.0 UPDATER_CHANNEL=stable
+          # feed completo: grava, e o conteudo do .sig entra no manifesto
+          printf '[{"tag_name":"v1.5.0","draft":true,"assets":%s}]' "$full" > "$GH_STUB_RELEASES"
+          out="$(node "$GITHUB_WORKSPACE/scripts/updater-manifest.mjs" build)"
+          if [ "$out" != "$manifest/latest.json" ]; then echo "esperava $manifest/latest.json, veio '$out'"; exit 1; fi
+          grep -q '"version": "1.5.0"' "$out"
+          grep -q '"signature": "assinatura-win"' "$out"
+          grep -q '"signature": "assinatura-mac"' "$out"
+          grep -q 'Notas da 1.5.0.' "$out"
+          grep -q 'releases/download/v1.5.0/App_1.5.0_x64-setup.exe' "$out"
+          grep -q 'releases/download/v1.5.0/App_1.5.0_aarch64.app.tar.gz' "$out"
+          if grep -q 'releases/latest' "$out"; then echo "URL movel no manifesto"; exit 1; fi
+          # feed incompleto (sem a assinatura do macOS): reprova e nao grava
+          rm -rf "$manifest"
+          printf '[{"tag_name":"v1.5.0","draft":true,"assets":[%s,%s]}]' "$win" "$winsig" > "$GH_STUB_RELEASES"
+          if node "$GITHUB_WORKSPACE/scripts/updater-manifest.mjs" build >/dev/null 2>&1; then
+            echo "esperava reprovar: a plataforma do macOS esta sem assinatura"; exit 1
+          fi
+          if [ -e "$manifest/latest.json" ]; then echo "manifesto parcial gravado"; exit 1; fi
+          # downgrade: o release segue, o feed nao anda
+          printf '[{"tag_name":"v1.6.0","draft":false,"assets":[{"name":"latest.json","id":3}]},{"tag_name":"v1.5.0","draft":true,"assets":%s}]' "$full" > "$GH_STUB_RELEASES"
+          out="$(node "$GITHUB_WORKSPACE/scripts/updater-manifest.mjs" build)"
+          if [ -n "$out" ]; then echo "esperava feed parado: 1.5.0 e menor que a 1.6.0 ja servida"; exit 1; fi
+          if [ -e "$manifest/latest.json" ]; then echo "manifesto gravado num downgrade"; exit 1; fi
+          # beta: asset proprio, e o latest.json do stable fica intacto
+          printf '[{"tag_name":"v1.5.0-beta.1","draft":true,"assets":%s}]' "$full" > "$GH_STUB_RELEASES"
+          out="$(TAG=v1.5.0-beta.1 UPDATER_CHANNEL=beta node "$GITHUB_WORKSPACE/scripts/updater-manifest.mjs" build)"
+          if [ "$out" != "$manifest/latest-beta.json" ]; then echo "beta fora do asset proprio: '$out'"; exit 1; fi
+          if [ -e "$manifest/latest.json" ]; then echo "beta escreveu no feed do stable"; exit 1; fi
+          # prerelease no canal stable: o release publica, o feed nao anda
+          out="$(TAG=v1.5.0-beta.1 UPDATER_CHANNEL=stable node "$GITHUB_WORKSPACE/scripts/updater-manifest.mjs" build)"
+          if [ -n "$out" ]; then echo "esperava feed parado: prerelease nao entra no stable"; exit 1; fi
+
   actionlint:
     runs-on: ubuntu-latest
     steps:

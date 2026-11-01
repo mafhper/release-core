@@ -99,6 +99,104 @@ Quando o projeto é um monorepo com npm, instale a partir da raiz e aponte `desk
 
 O `beforeBuildCommand` do app Tauri continua sendo responsável por compilar o frontend a partir da raiz do monorepo.
 
+## Updater do Tauri (opt-in)
+
+Para o app se atualizar sozinho, o bundler precisa **assinar** cada bundle de
+updater e a release precisa levar o `.sig` de cada plataforma. Ligue o bloco
+`updater` no `release.config.json`:
+
+```jsonc
+"updater": {
+  "channel": "stable",
+  "platforms": [
+    { "id": "windows-x86_64", "os": ["windows-latest"],
+      "sig": ["bundle/nsis/*x64-setup.exe.sig", "bundle/msi/*x64*.msi.sig"] },
+    { "id": "darwin-aarch64", "os": ["macos-latest"],
+      "sig": ["bundle/macos/*.app.tar.gz.sig"] }
+  ]
+}
+```
+
+Três coisas do lado do consumidor, e uma do lado do caller:
+
+1. **`createUpdaterArtifacts`** ligado no `tauri.conf.json` (e o
+   `tauri-plugin-updater` no app). Sem isso o bundler não emite `.sig` e a célula
+   reprova — que é o comportamento desejado, porque a release prometeria
+   atualização que o cliente não consegue verificar.
+2. **Chave de assinatura.** Gere o par uma vez (`tauri signer generate`), guarde a
+   pública no app e a **privada nos segredos do repositório** como
+   `TAURI_SIGNING_PRIVATE_KEY` (conteúdo do arquivo, ou o caminho dele) e, se você
+   usou senha, `TAURI_SIGNING_PRIVATE_KEY_PASSWORD`. Nunca no repositório, nunca
+   no log. Chave perdida significa uma base instalada que não recebe mais
+   atualização: a rotação é decisão de produto, não do workflow.
+3. **Callback do caller.** Os dois segredos são declarados como **opcionais** no
+   Core, então um caller que não usa updater continua válido sem mudar nada. Quem
+   usa passa os segredos do repositório:
+
+```yaml
+jobs:
+  release:
+    uses: mafhper/release-core/.github/workflows/release.yml@v1.3.0
+    permissions:
+      contents: write
+    secrets: inherit          # ou o mapa explícito: TAURI_SIGNING_PRIVATE_KEY: ${{ secrets.X }}
+    with:
+      matrix: |-
+        [
+          { "os": "windows-latest", "args": "--bundles nsis,msi" },
+          { "os": "macos-latest",   "args": "--bundles dmg" }
+        ]
+```
+
+O que o Core faz com isso: repassa as duas variáveis ao bundler no passo do
+`tauri-action`, publica os `.sig` que a célula produziu (com `--clobber`, como os
+artefatos declarados) e, no `finalize`, exige **uma assinatura por plataforma**
+declarada entre os assets. Faltando alguma, a release **fica em rascunho**.
+
+O nome real do bundle (`App_1.5.0_x64-setup.exe`, `App_1.5.0_aarch64.dmg`) muda a
+cada versão, então `sig` declara a **forma** (globs), não o nome. Na conferência, o
+Core compara o nome do asset com o último segmento do glob: o token que distingue
+as plataformas (`x64`, `aarch64`) tem de estar no **nome do arquivo**.
+
+Depois da conferência, o `finalize` publica o **manifesto do canal**:
+
+```json
+{
+  "version": "1.5.0",
+  "notes": "Notas da 1.5.0.",
+  "pub_date": "2026-11-01T12:00:00.000Z",
+  "platforms": {
+    "windows-x86_64": {
+      "signature": "conteúdo do .sig",
+      "url": "https://github.com/<owner>/<repo>/releases/download/v1.5.0/App_1.5.0_x64-setup.exe"
+    }
+  }
+}
+```
+
+O asset se chama `latest.json` no canal `stable` e `latest-beta.json` no `beta`.
+Do lado do app, o `tauri.conf.json` aponta para ele:
+
+```jsonc
+"plugins": {
+  "updater": {
+    "endpoints": ["https://github.com/<owner>/<repo>/releases/latest/download/latest.json"],
+    "pubkey": "…"
+  }
+}
+```
+
+`releases/latest/download/latest.json` é o ponteiro **do feed** — a release
+publicada mais recente — e é o único lugar em que `latest` é legítimo: as URLs
+**dentro** do manifesto são por tag, para o arquivo baixado nunca ser de outra
+versão. No canal `beta` o ponteiro `latest` do GitHub não serve (uma release
+prerelease não é a "latest"), então o endereço do feed beta é do consumidor.
+
+O manifesto é tudo ou nada: plataforma sem `.sig`, duas assinaturas casando a
+mesma forma, artefato assinado ausente, `.sig` de outra versão ou versão fora do
+SemVer deixam o release em rascunho; downgrade e prerelease no canal `stable`
+publicam o release e **não** movem o canal.
+
 ## Observações
 
 - O Release Core **não conhece** PersonalNews vs push_ vs Mark-Lee; a topologia é definida por célula da matrix (consome o rascunho do release de forma idempotente).

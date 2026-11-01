@@ -45,6 +45,17 @@ O contrato é pequeno, declarativo e validado pelo helper `scripts/release-confi
     "enabled": false,                      // ativa tauri-action
     "project_path": "."                    // raiz do projeto Tauri
   },
+  "updater": {                             // opcional (opt-in): ver "Updater (opt-in)"
+    "enabled": true,                       // ausente o bloco = desligado
+    "channel": "stable",                   // "stable" | "beta"
+    "platforms": [
+      {
+        "id": "windows-x86_64",            // chave <os>-<arch> que o manifesto usará
+        "os": ["windows-latest"],          // células que a produzem; "*" = todas
+        "sig": ["bundle/nsis/*x64-setup.exe.sig"] // globs das assinaturas que ela gera
+      }
+    ]
+  },
   "distribution": {
     "downloads_table": false,              // gera a seção "## Downloads" no corpo
     "artifacts": [
@@ -99,6 +110,10 @@ O contrato é pequeno, declarativo e validado pelo helper `scripts/release-confi
 | `build.node` | `22` se `package_manager` for `npm`; senão vazio |
 | `build.working_directory` | `.` (raiz do repositório) |
 | `desktop.project_path` | `.` |
+| `updater` (bloco) | ausente = desligado: nenhum passo, asset ou chave `UPDATER_*` |
+| `updater.enabled` | `true` quando o bloco existe (declarar já é a decisão) |
+| `updater.channel` | `stable` (`latest.json`; no canal `beta`, `latest-beta.json`) |
+| `updater.platforms[].os` | `["*"]` |
 | `distribution.artifacts` | `[]` (o bloco `artifact` legado é normalizado para uma entrada) |
 | `distribution.downloads_table` | `false` |
 | `artifact.path` / `globs` / `validate` | `[]` |
@@ -115,6 +130,8 @@ O contrato é pequeno, declarativo e validado pelo helper `scripts/release-confi
 - `bun` declarado exige `package_manager: "bun"`; `npm` exige `node` com versão.
 - `build.working_directory` deve ser um caminho relativo à raiz do repositório.
 - `desktop: true` exige `build.rust`. **Não** restringe `build.command` nem `distribution.artifacts` — o perfil misto (site **e** instaladores) é declarado, não proibido.
+- `updater.enabled` exige `desktop.enabled` — o updater assina o que o Tauri empacota.
+- `updater.channel` é enum (`stable`/`beta`); `updater.platforms[].id` é a chave `<os>-<arch>` (`windows-x86_64`, `darwin-aarch64`, `linux-x86_64`), única na lista; `sig` são globs das assinaturas e não podem ser vazios; com o bloco habilitado, `platforms` não pode ser vazio.
 - `distribution.artifacts` é um array de `{ id, path|globs, os, required, kind, label, platform, architecture, release_name, validate }`. `id` é slug único; `path` e `globs` não podem ser ambos vazios; `os` padrão é `["*"]`; `required` padrão é `true`.
 - `distribution.artifacts` e o bloco `artifact` **não podem ser declarados juntos** — a mensagem de erro entrega a migração.
 - `release_name` exige exatamente um arquivo por artefato.
@@ -221,6 +238,151 @@ ninguém viu.
 As dependências do projeto são instaladas e os passos `gates → pre → build` rodam em `build.working_directory` (default `.`, a raiz do repositório). Em monorepos onde o app Tauri vive num subdiretório (ex.: `apps/desktop`), a instalação continua na **raiz** — onde está o `package-lock.json`/`bun.lock` — e só o `tauri-action` recebe `desktop.project_path`.
 
 A instalação acontece **sempre que `package_manager` é declarado**, inclusive com `desktop.enabled: true`: o `beforeBuildCommand` do Tauri depende do workspace instalado.
+
+## Updater (opt-in)
+
+O updater do Tauri instala, dentro do app, uma versão nova baixada de um `.sig`
+verificado com a chave pública. O Core **não vira updater** — ele entrega o que
+o cliente precisa para se atualizar com segurança, e nada além disso.
+
+O bloco é **opcional e desligado por ausência**. Sem ele, o Core não cria passo,
+não publica asset, não confere nada e não emite nenhuma chave `UPDATER_*` no
+ambiente do job — o comportamento de quem não declara é o de sempre, e isso é
+verificado no CI.
+
+```jsonc
+"updater": {
+  "channel": "stable",
+  "platforms": [
+    { "id": "windows-x86_64", "os": ["windows-latest"],
+      "sig": ["bundle/nsis/*x64-setup.exe.sig", "bundle/msi/*x64*.msi.sig"] },
+    { "id": "darwin-aarch64", "os": ["macos-latest"],
+      "sig": ["bundle/macos/*.app.tar.gz.sig"] },
+    { "id": "linux-x86_64", "os": ["ubuntu-latest"],
+      "sig": ["bundle/appimage/*.AppImage.tar.gz.sig"] }
+  ]
+}
+```
+
+O que ligar o bloco faz:
+
+1. **Assinatura no build.** O Core repassa `TAURI_SIGNING_PRIVATE_KEY` e
+   `TAURI_SIGNING_PRIVATE_KEY_PASSWORD` ao bundler. Os dois são **segredos
+   opcionais** do workflow: quem não declara o bloco não precisa passar nada, e
+   quem declara precisa (`secrets: inherit` no caller). Com o bloco habilitado e
+   sem a chave, o passo de assinatura **reprova** em vez de publicar uma release
+   que todo cliente instalado recusa.
+2. **Coleta e publicação dos `.sig`.** Cada célula publica as assinaturas das
+   plataformas que ela produz, com `--clobber`, como o coletor de artefatos faz
+   com os arquivos declarados. Plataforma atribuída à célula **sem assinatura em
+   disco** reprova a célula: é a diferença entre "o build passou" e "o cliente
+   tem como verificar o que vai receber".
+3. **Conferência na release.** O `finalize` exige **uma assinatura por
+   plataforma declarada** entre os assets publicados. Falhar aqui deixa o
+   release em rascunho — `build` verde fala de células, e a pergunta que importa
+   é sobre a release inteira.
+4. **Manifesto do canal.** Depois dessa conferência, o `finalize` monta e publica
+   o `latest.json` (ou `latest-beta.json`) com versão, notas, data e, por
+   plataforma, a URL da tag e o conteúdo do `.sig`. Detalhe em "O manifesto do
+   canal" e "O gate: o feed só avança completo".
+
+### `sig`: a forma, não o nome
+
+O Core não conhece o nome que o Tauri dá ao bundle: ele carrega versão, arch e
+flavour, e muda a cada release. O que a plataforma declara é a **forma** das
+assinaturas — globs, a mesma semântica de `distribution.artifacts[].globs` e de
+`matrix[].expect`.
+
+Na coleta, o glob é expandido a partir da raiz do repositório. Na conferência da
+release, o que se compara é o **nome do asset** com o último segmento do glob,
+porque o asset publicado é o arquivo, sem diretório. Por isso o token que
+distingue as plataformas (`x64`, `aarch64`, `arm64`) precisa estar no **nome do
+arquivo**, não só no diretório.
+
+### `id`: a chave da plataforma
+
+`id` é a chave `<os>-<arch>` do updater (`windows-x86_64`, `darwin-aarch64`,
+`linux-x86_64`, ...). Ela é usada **literalmente** como chave da plataforma no
+manifesto: um erro de digitação aqui não aparece no log — aparece como um app que
+nunca recebe atualização, porque o cliente procura a chave dele e não encontra.
+
+### `channel`: qual feed esta release move
+
+`stable` (default) ou `beta`. O canal decide **em que asset** o manifesto é
+publicado, e é isso que impede um beta de sobrescrever o feed de quem está no
+stable:
+
+| Canal | Asset | Observação |
+|---|---|---|
+| `stable` | `latest.json` | é o nome que o plugin procura por convenção |
+| `beta` | `latest-beta.json` | nome próprio, feed próprio |
+
+Uma tag prerelease (`v1.5.0-beta.1`) **não entra** no canal `stable`: um app do
+stable receberia uma versão de teste sem ter pedido. O contrário não é proibido —
+uma versão estável pode ser publicada no canal beta.
+
+### O manifesto do canal
+
+Com o bloco habilitado, o `finalize` publica o manifesto do canal como asset da
+release, depois de conferir as assinaturas e antes de o release virar público
+(assim o asset já existe no instante em que o rascunho é publicado):
+
+```json
+{
+  "version": "1.5.0",
+  "notes": "Notas da 1.5.0.",
+  "pub_date": "2026-11-01T12:00:00.000Z",
+  "platforms": {
+    "windows-x86_64": {
+      "signature": "conteúdo do .sig",
+      "url": "https://github.com/<owner>/<repo>/releases/download/v1.5.0/App_1.5.0_x64-setup.exe"
+    }
+  }
+}
+```
+
+O formato carrega quatro decisões:
+
+- **`signature` é o conteúdo do `.sig`**, não o nome do arquivo: é com ele que o
+  cliente verifica o pacote baixado.
+- **`url` nomeia a tag**, sempre (`/releases/download/<tag>/<arquivo>`). Nunca
+  `releases/latest`: um ponteiro móvel serviria o arquivo de outro release sob a
+  mesma URL, e o cliente instalaria uma versão diferente da anunciada.
+- **uma URL por plataforma**, e a **ordem de `sig`** é a preferência. Quem
+  declara dois bundles de updater (NSIS e MSI, por exemplo) decide qual é o alvo
+  da atualização pela ordem dos globs. Duas assinaturas casando a mesma forma é
+  ambíguo e reprova — normalmente é o `.sig` de uma execução anterior que ficou
+  na release.
+- **`notes` são as mesmas notas manuais do corpo** (`NOTES_DIR`/granularidade);
+  sem arquivo, string vazia. `pub_date` é o instante em que o manifesto foi
+  gerado (UTC).
+
+### O gate: o feed só avança completo
+
+O manifesto é tudo ou nada, e o bloqueio tem dois níveis — a diferença entre "não
+publique" e "não promova":
+
+| Nível | O que bloqueia | Casos |
+|---|---|---|
+| `release` | a publicação: o release **fica em rascunho** | plataforma declarada sem assinatura na release; duas assinaturas casando a mesma forma; artefato assinado ausente (a URL responderia 404); nome carregando outra versão (o artefato veio de outro build); `.sig` vazio; versão fora do SemVer; nenhuma plataforma declarada |
+| `feed` | só o manifesto: o release publica, o canal não anda | downgrade (o canal já serve versão maior); tag prerelease no canal `stable` |
+
+A release parcial pode existir — publicada à mão, se for o caso — mas o canal não
+anda: quem consulta o feed não a vê. É a diferença entre "existe uma release" e
+"existe uma atualização".
+
+### O que este bloco ainda não faz
+
+- **Não assina**: a chave privada e o `createUpdaterArtifacts` são do app. O Core
+  transporta a chave ao bundler e publica o que ele assinou.
+- **Não verifica a assinatura criptograficamente**: isso é do cliente, com a
+  chave pública dele. O Core garante que o `.sig` está na release, que o artefato
+  assinado também está e que o nome carrega esta versão.
+- **Não hospeda o endereço do feed**: o manifesto é um asset da tag. No stable, o
+  ponteiro `releases/latest/download/latest.json` do GitHub resolve para a
+  release publicada mais recente; no beta, uma release prerelease não é a
+  "latest", então o endereço do canal é do consumidor (branch próprio, página
+  estática ou a tag específica).
 
 ## Versão
 A cadeia é determinística: `vX.Y.Z` (tag) → `X.Y.Z`. O Core valida `package.json` (sempre canônico) e cada item de `versions.files` (json via campo aninhado com pontos; toml via seção `package.version`). Qualquer divergência falha antes do build.
