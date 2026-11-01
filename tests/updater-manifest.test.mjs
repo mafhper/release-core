@@ -25,6 +25,7 @@ import {
   buildFeed,
   channelManifestName,
   compareSemver,
+  immutableAssetUrl,
   notesPath,
   parseSemver,
   servedChannelReleases,
@@ -431,6 +432,54 @@ test("CLI recusa modo desconhecido em vez de não fazer nada", () => {
   const res = spawnSync(process.execPath, [SCRIPT, "publish"], { encoding: "utf8", env: process.env });
   assert.equal(res.status, 1);
   assert.match(res.stderr, /modo desconhecido/);
+});
+
+// --- guardas de ambiente (o manifesto não passa vazio por acidente) ----------
+
+test("CONTROLE NEGATIVO: plataforma nenhuma não gera manifesto vazio", () => {
+  const { promote, blockers, manifest } = buildFeed(feed({ platforms: [] }));
+  assert.equal(promote, false);
+  assert.equal(manifest, null);
+  assert.deepEqual(codes({ blockers }), [["no-platforms", "release"]]);
+});
+
+test("a URL do artefato exige repo, tag e nome: sem eles não há endereço", () => {
+  assert.throws(() => immutableAssetUrl("", "v1.5.0", "a.exe"), /precisa de repo, tag e nome/);
+  assert.throws(() => immutableAssetUrl("mafhper/demo", "", "a.exe"), /precisa de repo, tag e nome/);
+  assert.equal(
+    immutableAssetUrl("mafhper/demo", "v1.5.0", "App.exe"),
+    "https://github.com/mafhper/demo/releases/download/v1.5.0/App.exe",
+  );
+});
+
+test("o manifesto não sai sem pub_date: atualização sem data não é atualização", () => {
+  assert.throws(() => buildFeed(feed({ pubDate: "" })), /pub_date é obrigatório/);
+});
+
+test("CLI: entrada de ambiente quebrada reprova em vez de virar manifesto plausível", () => {
+  const semRepo = runCli({ REPO: "" });
+  assert.equal(semRepo.status, 1);
+  assert.match(semRepo.stderr, /REPO é obrigatório/);
+
+  const semTag = runCli({ TAG: "" });
+  assert.equal(semTag.status, 1);
+  assert.match(semTag.stderr, /TAG é obrigatória/);
+
+  const semOut = runCli({ UPDATER_MANIFEST_OUT: "" });
+  assert.equal(semOut.status, 1);
+  assert.match(semOut.stderr, /UPDATER_MANIFEST_OUT é obrigatório/);
+
+  const releasesRuim = runCli({ UPDATER_MANIFEST_OUT: outDir(), RELEASES_JSON: "nao-json" });
+  assert.equal(releasesRuim.status, 1);
+  assert.match(releasesRuim.stderr, /RELEASES_JSON não é JSON válido/);
+
+  const sigRuim = runCli({ UPDATER_MANIFEST_OUT: outDir(), UPDATER_SIG_JSON: "{oops" });
+  assert.equal(sigRuim.status, 1);
+  assert.match(sigRuim.stderr, /UPDATER_SIG_JSON não é JSON válido/);
+
+  const releaseAusente = runCli({ UPDATER_MANIFEST_OUT: outDir(), TAG: "v9.9.9" });
+  assert.equal(releaseAusente.status, 1);
+  assert.match(releaseAusente.stderr, /release não encontrada para a tag v9\.9\.9/);
 });
 
 // --- o passo do workflow -----------------------------------------------------
