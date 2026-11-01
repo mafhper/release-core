@@ -45,6 +45,17 @@ O contrato é pequeno, declarativo e validado pelo helper `scripts/release-confi
     "enabled": false,                      // ativa tauri-action
     "project_path": "."                    // raiz do projeto Tauri
   },
+  "updater": {                             // opcional (opt-in): ver "Updater (opt-in)"
+    "enabled": true,                       // ausente o bloco = desligado
+    "channel": "stable",                   // "stable" | "beta"
+    "platforms": [
+      {
+        "id": "windows-x86_64",            // chave <os>-<arch> que o manifesto usará
+        "os": ["windows-latest"],          // células que a produzem; "*" = todas
+        "sig": ["bundle/nsis/*x64-setup.exe.sig"] // globs das assinaturas que ela gera
+      }
+    ]
+  },
   "distribution": {
     "downloads_table": false,              // gera a seção "## Downloads" no corpo
     "artifacts": [
@@ -99,6 +110,10 @@ O contrato é pequeno, declarativo e validado pelo helper `scripts/release-confi
 | `build.node` | `22` se `package_manager` for `npm`; senão vazio |
 | `build.working_directory` | `.` (raiz do repositório) |
 | `desktop.project_path` | `.` |
+| `updater` (bloco) | ausente = desligado: nenhum passo, asset ou chave `UPDATER_*` |
+| `updater.enabled` | `true` quando o bloco existe (declarar já é a decisão) |
+| `updater.channel` | `stable` |
+| `updater.platforms[].os` | `["*"]` |
 | `distribution.artifacts` | `[]` (o bloco `artifact` legado é normalizado para uma entrada) |
 | `distribution.downloads_table` | `false` |
 | `artifact.path` / `globs` / `validate` | `[]` |
@@ -115,6 +130,8 @@ O contrato é pequeno, declarativo e validado pelo helper `scripts/release-confi
 - `bun` declarado exige `package_manager: "bun"`; `npm` exige `node` com versão.
 - `build.working_directory` deve ser um caminho relativo à raiz do repositório.
 - `desktop: true` exige `build.rust`. **Não** restringe `build.command` nem `distribution.artifacts` — o perfil misto (site **e** instaladores) é declarado, não proibido.
+- `updater.enabled` exige `desktop.enabled` — o updater assina o que o Tauri empacota.
+- `updater.channel` é enum (`stable`/`beta`); `updater.platforms[].id` é a chave `<os>-<arch>` (`windows-x86_64`, `darwin-aarch64`, `linux-x86_64`), única na lista; `sig` são globs das assinaturas e não podem ser vazios; com o bloco habilitado, `platforms` não pode ser vazio.
 - `distribution.artifacts` é um array de `{ id, path|globs, os, required, kind, label, platform, architecture, release_name, validate }`. `id` é slug único; `path` e `globs` não podem ser ambos vazios; `os` padrão é `["*"]`; `required` padrão é `true`.
 - `distribution.artifacts` e o bloco `artifact` **não podem ser declarados juntos** — a mensagem de erro entrega a migração.
 - `release_name` exige exatamente um arquivo por artefato.
@@ -221,6 +238,84 @@ ninguém viu.
 As dependências do projeto são instaladas e os passos `gates → pre → build` rodam em `build.working_directory` (default `.`, a raiz do repositório). Em monorepos onde o app Tauri vive num subdiretório (ex.: `apps/desktop`), a instalação continua na **raiz** — onde está o `package-lock.json`/`bun.lock` — e só o `tauri-action` recebe `desktop.project_path`.
 
 A instalação acontece **sempre que `package_manager` é declarado**, inclusive com `desktop.enabled: true`: o `beforeBuildCommand` do Tauri depende do workspace instalado.
+
+## Updater (opt-in)
+
+O updater do Tauri instala, dentro do app, uma versão nova baixada de um `.sig`
+verificado com a chave pública. O Core **não vira updater** — ele entrega o que
+o cliente precisa para se atualizar com segurança, e nada além disso.
+
+O bloco é **opcional e desligado por ausência**. Sem ele, o Core não cria passo,
+não publica asset, não confere nada e não emite nenhuma chave `UPDATER_*` no
+ambiente do job — o comportamento de quem não declara é o de sempre, e isso é
+verificado no CI.
+
+```jsonc
+"updater": {
+  "channel": "stable",
+  "platforms": [
+    { "id": "windows-x86_64", "os": ["windows-latest"],
+      "sig": ["bundle/nsis/*x64-setup.exe.sig", "bundle/msi/*x64*.msi.sig"] },
+    { "id": "darwin-aarch64", "os": ["macos-latest"],
+      "sig": ["bundle/macos/*.app.tar.gz.sig"] },
+    { "id": "linux-x86_64", "os": ["ubuntu-latest"],
+      "sig": ["bundle/appimage/*.AppImage.tar.gz.sig"] }
+  ]
+}
+```
+
+O que ligar o bloco faz:
+
+1. **Assinatura no build.** O Core repassa `TAURI_SIGNING_PRIVATE_KEY` e
+   `TAURI_SIGNING_PRIVATE_KEY_PASSWORD` ao bundler. Os dois são **segredos
+   opcionais** do workflow: quem não declara o bloco não precisa passar nada, e
+   quem declara precisa (`secrets: inherit` no caller). Com o bloco habilitado e
+   sem a chave, o passo de assinatura **reprova** em vez de publicar uma release
+   que todo cliente instalado recusa.
+2. **Coleta e publicação dos `.sig`.** Cada célula publica as assinaturas das
+   plataformas que ela produz, com `--clobber`, como o coletor de artefatos faz
+   com os arquivos declarados. Plataforma atribuída à célula **sem assinatura em
+   disco** reprova a célula: é a diferença entre "o build passou" e "o cliente
+   tem como verificar o que vai receber".
+3. **Conferência na release.** O `finalize` exige **uma assinatura por
+   plataforma declarada** entre os assets publicados. Falhar aqui deixa o
+   release em rascunho — `build` verde fala de células, e a pergunta que importa
+   é sobre a release inteira.
+
+### `sig`: a forma, não o nome
+
+O Core não conhece o nome que o Tauri dá ao bundle: ele carrega versão, arch e
+flavour, e muda a cada release. O que a plataforma declara é a **forma** das
+assinaturas — globs, a mesma semântica de `distribution.artifacts[].globs` e de
+`matrix[].expect`.
+
+Na coleta, o glob é expandido a partir da raiz do repositório. Na conferência da
+release, o que se compara é o **nome do asset** com o último segmento do glob,
+porque o asset publicado é o arquivo, sem diretório. Por isso o token que
+distingue as plataformas (`x64`, `aarch64`, `arm64`) precisa estar no **nome do
+arquivo**, não só no diretório.
+
+### `id`: a chave da plataforma
+
+`id` é a chave `<os>-<arch>` do updater (`windows-x86_64`, `darwin-aarch64`,
+`linux-x86_64`, ...). Hoje ela é validada na forma e aparece no log; o manifesto
+por canal — o lote seguinte — a usa **literalmente** como chave da plataforma, e
+o valor do erro de digitação passa a ser um app que nunca recebe atualização.
+
+### `channel`
+
+`stable` (default) ou `beta`. Declarado agora e **inerte** até o manifesto por
+canal existir: nenhum gate de promoção, nenhuma checagem de que a tag de
+prerelease só entra no canal `beta`. Quando o manifesto entrar, ele é que lê
+esta chave.
+
+### O que este bloco ainda não faz
+
+- **Não gera `latest.json`** (o manifesto dinâmico do plugin). O `.sig` publicado
+  é o insumo; o manifesto por canal é o próximo lote.
+- **Não tem gate de promoção**: uma release parcial (uma plataforma que não
+  rodou) falha na conferência acima, mas nenhum canal automático é avançado nem
+  bloqueado por isso, porque ainda não existe canal.
 
 ## Versão
 A cadeia é determinística: `vX.Y.Z` (tag) → `X.Y.Z`. O Core valida `package.json` (sempre canônico) e cada item de `versions.files` (json via campo aninhado com pontos; toml via seção `package.version`). Qualquer divergência falha antes do build.

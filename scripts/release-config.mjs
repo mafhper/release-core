@@ -15,7 +15,14 @@ const VALID_PACKAGE_MANAGERS = new Set(["bun", "npm"]);
 const VALID_NOTES_GRANULARITY = new Set(["tag", "minor"]);
 const VALID_IMAGE_GRANULARITY = new Set(["tag", "minor"]);
 const VALID_IMAGE_REUSE = new Set(["forbid", "allow"]);
+const VALID_UPDATER_CHANNELS = new Set(["stable", "beta"]);
 const FULL_TAG_RE = /^v\d+\.\d+\.\d+$/;
+// A chave de plataforma do updater é `<os>-<arch>` — a mesma que o manifesto por
+// canal vai usar como chave (o cliente do plugin lê exatamente esse nome). Não é
+// uma lista fechada de alvos: fechá-la obrigaria o Core a mudar quando o Tauri
+// ganhasse um alvo novo. É a forma que se valida, para que "win-x64" (o erro de
+// digitação plausível) reprove antes do build em vez de virar rótulo silencioso.
+const UPDATER_PLATFORM_RE = /^(windows|darwin|linux)-[a-z0-9_]+$/;
 
 function fail(message) {
   console.error(`[release-config] ${message}`);
@@ -119,6 +126,111 @@ function optionalString(value, path, name) {
   if (value === undefined || value === null) return "";
   if (typeof value !== "string") fail(`${path}.${name} deve ser string.`);
   return value;
+}
+
+/**
+ * Glob de contrato precisa **parecer** padrão: um caminho fixo não expande e o
+ * erro aparece longe da causa (na coleta, como "nada encontrado"). A mensagem
+ * fica no ponto em que o contrato é declarado.
+ */
+function assertGlobs(globs, path, name) {
+  for (const glob of globs) {
+    if (!glob.includes("*") && !glob.includes("?")) {
+      fail(`${path}.${name} deve conter padrões glob ("${glob}" não parece um padrão).`);
+    }
+  }
+  return globs;
+}
+
+/** `os` ausente é "qualquer célula", o mesmo default de `distribution.artifacts`. */
+function osDefault(value, at) {
+  const os = arrayify(value, at, "os");
+  return os.length === 0 ? ["*"] : os;
+}
+
+/**
+ * Bloco `updater` (opt-in): o que o Core precisa saber para assinar os
+ * instaladores e provar, na release, que as assinaturas chegaram.
+ *
+ * A ausência do bloco é a resposta "desligado" — e desligado é literalmente
+ * nada: nenhum passo novo no workflow, nenhum asset, nenhuma chave `UPDATER_*`
+ * no `$GITHUB_ENV`. É o que mantém os sete consumidores existentes idênticos.
+ *
+ * `enabled` tem default `true` **dentro** do bloco porque declarar o bloco já é
+ * a decisão; `false` existe para desligar sem apagar a declaração (staging da
+ * config antes dos segredos existirem). `channel` é declarado agora e inerte
+ * até o manifesto por canal existir: o lote seguinte o consome, e hoje ele só
+ * valida o valor e aparece no log.
+ */
+function normalizeUpdater(raw, desktopEnabled) {
+  if (typeof raw !== "object" || raw === null || Array.isArray(raw)) {
+    fail("updater deve ser um objeto { enabled, channel, platforms }.");
+  }
+
+  const enabled = raw.enabled ?? true;
+  if (typeof enabled !== "boolean") {
+    fail("updater.enabled deve ser booleano.");
+  }
+
+  const channel = raw.channel ?? "stable";
+  if (!VALID_UPDATER_CHANNELS.has(channel)) {
+    fail(`updater.channel deve ser "stable" ou "beta" (recebido: "${channel}").`);
+  }
+
+  // O updater assina o que o Tauri empacota: sem desktop não há instalador
+  // assinado, e um bloco declarado assim é uma promessa que o Core não cumpre.
+  if (enabled && !desktopEnabled) {
+    fail(
+      "updater.enabled é true, mas desktop.enabled não é: o updater assina os instaladores que o Tauri gera. " +
+        "Ligue desktop (com build.rust) ou desligue o bloco.",
+    );
+  }
+
+  const platforms = [];
+  if (raw.platforms !== undefined && raw.platforms !== null) {
+    if (!Array.isArray(raw.platforms)) {
+      fail("updater.platforms deve ser um array de { id, os, sig }.");
+    }
+    const seen = new Set();
+    raw.platforms.forEach((entry, index) => {
+      const at = `updater.platforms[${index}]`;
+      if (typeof entry !== "object" || entry === null || Array.isArray(entry)) {
+        fail(`${at} deve ser um objeto { id, os, sig }.`);
+      }
+      if (typeof entry.id !== "string" || !UPDATER_PLATFORM_RE.test(entry.id)) {
+        fail(
+          `${at}.id deve ser a chave de plataforma do updater, no formato <os>-<arch> ` +
+            `(ex.: "windows-x86_64", "darwin-aarch64", "linux-x86_64"); recebido: "${entry.id}". ` +
+            "Ela é o nome que o manifesto por canal vai usar na chave da plataforma.",
+        );
+      }
+      if (seen.has(entry.id)) {
+        fail(`${at}.id ("${entry.id}") repete: duas plataformas com a mesma chave são indistinguíveis no log e na conferência da release.`);
+      }
+      seen.add(entry.id);
+
+      // Sem `sig` não há o que coletar nem o que conferir: a plataforma
+      // declarada seria só um nome no log.
+      const sig = assertGlobs(arrayify(entry.sig, at, "sig"), at, "sig");
+      if (sig.length === 0) {
+        fail(
+          `${at} (id "${entry.id}") precisa de sig: os globs dos \`.sig\` que a plataforma produz. ` +
+            "Sem eles, não há o que publicar nem como provar que a assinatura chegou à release.",
+        );
+      }
+
+      platforms.push({ id: entry.id, os: osDefault(entry.os, at), sig });
+    });
+  }
+
+  if (enabled && platforms.length === 0) {
+    fail(
+      "updater.enabled é true, mas updater.platforms está vazio: sem plataforma declarada não há assinatura " +
+        "para publicar, e a release afirmaria atualização que ninguém consegue verificar.",
+    );
+  }
+
+  return { enabled, channel, platforms };
 }
 
 /**
@@ -468,6 +580,15 @@ function load(configPath) {
     fail("distribution.downloads_table deve ser booleano.");
   }
 
+  // ---- updater (opt-in) ----------------------------------------------------
+  //
+  // Ausente o bloco, `updater` é `null` e nada é emitido: o caminho de quem não
+  // usa updater tem de ser o mesmo de antes, byte a byte.
+  const updater =
+    config.updater === undefined || config.updater === null
+      ? null
+      : normalizeUpdater(config.updater, desktopEnabled);
+
   const versions = config.versions ?? {};
   const versionFiles = [];
   if (versions.files !== undefined && versions.files !== null) {
@@ -523,6 +644,11 @@ function load(configPath) {
     desktop: { enabled: desktopEnabled, projectPath: desktopProjectPath },
     distribution: { artifacts, downloadsTable },
     versions: { files: versionFiles },
+    // A chave só existe quando o bloco é declarado. O golden dos sete
+    // consumidores (`tests/fixtures/projects/expected`) é o que prova que quem
+    // não declara updater não enxerga contrato novo — e uma chave com default
+    // apareceria lá como mudança de semântica para todos eles.
+    ...(updater ? { updater } : {}),
   };
 }
 
@@ -572,6 +698,9 @@ function getKey(cfg, key) {
     artifact_release_name: cfg.distribution.artifacts.find((a) => a.releaseName)?.releaseName ?? "",
     distribution_artifacts: cfg.distribution.artifacts,
     downloads_table: cfg.distribution.downloadsTable,
+    updater_enabled: String(cfg.updater?.enabled ?? false),
+    updater_channel: cfg.updater?.channel ?? "",
+    updater_platforms: cfg.updater?.platforms ?? [],
     version_files: cfg.versions.files,
   };
   if (!(key in map)) {
@@ -619,6 +748,14 @@ function printEnv(cfg) {
   emitEnvLine(lines, "BUILD_COMMAND", cfg.build.command);
   emitEnvLine(lines, "DESKTOP", String(cfg.desktop.enabled));
   emitEnvLine(lines, "DESKTOP_PROJECT_PATH", cfg.desktop.projectPath);
+  // Sem o bloco `updater`, nenhuma linha `UPDATER_*` é emitida: o ambiente do
+  // job de quem não usa updater continua byte a byte o de antes, e o workflow
+  // inteiro depende de `UPDATER_ENABLED` para existir passo novo.
+  if (cfg.updater) {
+    emitEnvLine(lines, "UPDATER_ENABLED", String(cfg.updater.enabled));
+    emitEnvLine(lines, "UPDATER_CHANNEL", cfg.updater.channel);
+    emitEnvLine(lines, "UPDATER_PLATFORMS", JSON.stringify(cfg.updater.platforms));
+  }
   // A lista inteira vai num env só: o coletor é um script node, e serializar em
   // N variáveis seria uma translation layer sem ganho.
   emitEnvLine(lines, "DIST_ARTIFACTS", JSON.stringify(cfg.distribution.artifacts));
