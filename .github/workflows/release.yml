@@ -15,6 +15,17 @@ on:
         type: string
         required: false
         default: ''
+    # Segredos do updater, **opcionais de propósito**: só quem declara o bloco
+    # `updater` no contrato precisa deles, e um consumidor que ainda não declara
+    # não muda de comportamento por eles existirem aqui. Quem liga o bloco passa
+    # os segredos do repositório no caller (`secrets: inherit` ou o mapa explícito);
+    # sem a chave, o passo de assinatura reprova alto em vez de publicar uma
+    # release que todo cliente do updater recusa.
+    secrets:
+      TAURI_SIGNING_PRIVATE_KEY:
+        required: false
+      TAURI_SIGNING_PRIVATE_KEY_PASSWORD:
+        required: false
 
 permissions:
   contents: write
@@ -327,6 +338,37 @@ jobs:
           path: ${{ env.TOOLS_CACHE_DIR }}
           key: tauri-tools-${{ runner.os }}-wix314-v1
 
+      - name: Preparar a assinatura do updater (Tauri)
+        # Sem `updater` no contrato, `UPDATER_ENABLED` não existe no ambiente e o
+        # passo não roda — nem o `env:` dele é avaliado. É o que mantém o job de
+        # quem não usa updater idêntico ao de antes.
+        if: env.UPDATER_ENABLED == 'true'
+        env:
+          UPDATER_KEY: ${{ secrets.TAURI_SIGNING_PRIVATE_KEY }}
+          UPDATER_KEY_PASSWORD: ${{ secrets.TAURI_SIGNING_PRIVATE_KEY_PASSWORD }}
+        run: |
+          # As duas variáveis vão para o $GITHUB_ENV (e não direto no `env:` do
+          # tauri-action) para que a chave atravesse a fronteira do jeito que o
+          # runner garante e para que o passo do action não ganhe um `env:` novo
+          # para quem não assina. Heredoc porque a chave do minisign é multilinha.
+          if [ -z "$UPDATER_KEY" ]; then
+            echo "::error::updater habilitado no contrato, mas o segredo TAURI_SIGNING_PRIVATE_KEY não chegou a este workflow. Passe os segredos no caller (secrets: inherit) ou desligue o bloco updater."
+            exit 1
+          fi
+          {
+            echo "TAURI_SIGNING_PRIVATE_KEY<<TAURI_SIGNING_PRIVATE_KEY_EOF"
+            printf '%s\n' "$UPDATER_KEY"
+            echo "TAURI_SIGNING_PRIVATE_KEY_EOF"
+          } >> "$GITHUB_ENV"
+          if [ -n "$UPDATER_KEY_PASSWORD" ]; then
+            {
+              echo "TAURI_SIGNING_PRIVATE_KEY_PASSWORD<<TAURI_SIGNING_PRIVATE_KEY_PASSWORD_EOF"
+              printf '%s\n' "$UPDATER_KEY_PASSWORD"
+              echo "TAURI_SIGNING_PRIVATE_KEY_PASSWORD_EOF"
+            } >> "$GITHUB_ENV"
+          fi
+          echo "Assinatura do updater preparada: a chave chega ao bundler pelo ambiente do passo seguinte."
+
       - name: Compilar e publicar instaladores (Tauri)
         if: env.DESKTOP == 'true'
         env:
@@ -362,6 +404,32 @@ jobs:
             sleep 5
           done
           echo "Artefatos publicados por esta célula: ${#files[@]}"
+
+      - name: Coletar e publicar as assinaturas do updater
+        # Depois do tauri-action, que é quem produz o bundle, e depois do coletor
+        # de artefatos: esta célula publica só o que ela mesma assinou.
+        if: env.UPDATER_ENABLED == 'true'
+        env:
+          UPDATER_CELL_OS: ${{ matrix.os }}
+          UPDATER_SIG_OUT: ${{ runner.temp }}/updater-signatures.txt
+        run: |
+          node "$RUNNER_TEMP/.release-tools/scripts/updater-signatures.mjs" collect
+          files=()
+          while IFS= read -r f; do [ -n "$f" ] && files+=("$f"); done < "$UPDATER_SIG_OUT"
+          if [ "${#files[@]}" -eq 0 ]; then
+            echo "Célula sem assinatura a publicar."
+            exit 0
+          fi
+          attempt=1
+          until gh release upload "$TAG" --repo "$REPO" --clobber "${files[@]}"; do
+            if [ "$attempt" -ge 3 ]; then
+              echo "::error::Falha ao enviar as assinaturas do updater após $attempt tentativas."; exit 1
+            fi
+            echo "Reenviando assinaturas do updater (tentativa $((attempt + 1)))..."
+            attempt=$((attempt + 1))
+            sleep 5
+          done
+          echo "Assinaturas do updater publicadas por esta célula: ${#files[@]}"
 
       - name: Conferir o que esta célula prometeu produzir
         if: ${{ matrix.expect != null && matrix.expect != '' }}
@@ -404,6 +472,13 @@ jobs:
         if: env.DIST_HAS_ARTIFACTS == 'true'
         run: |
           node "$RUNNER_TEMP/.release-tools/scripts/verify-artifacts.mjs"
+
+      - name: Conferir as assinaturas do updater na release
+        # O outro lado do coletor: `build` verde fala de células, e "a plataforma X
+        # tem assinatura na release" é uma afirmação sobre a release. Reprovar aqui
+        # deixa o rascunho sem publicar — que é o estado certo.
+        if: env.UPDATER_ENABLED == 'true'
+        run: node "$RUNNER_TEMP/.release-tools/scripts/updater-signatures.mjs" verify
 
       - name: Publicar a arte de release
         env:
