@@ -112,7 +112,7 @@ O contrato é pequeno, declarativo e validado pelo helper `scripts/release-confi
 | `desktop.project_path` | `.` |
 | `updater` (bloco) | ausente = desligado: nenhum passo, asset ou chave `UPDATER_*` |
 | `updater.enabled` | `true` quando o bloco existe (declarar já é a decisão) |
-| `updater.channel` | `stable` |
+| `updater.channel` | `stable` (`latest.json`; no canal `beta`, `latest-beta.json`) |
 | `updater.platforms[].os` | `["*"]` |
 | `distribution.artifacts` | `[]` (o bloco `artifact` legado é normalizado para uma entrada) |
 | `distribution.downloads_table` | `false` |
@@ -281,6 +281,10 @@ O que ligar o bloco faz:
    plataforma declarada** entre os assets publicados. Falhar aqui deixa o
    release em rascunho — `build` verde fala de células, e a pergunta que importa
    é sobre a release inteira.
+4. **Manifesto do canal.** Depois dessa conferência, o `finalize` monta e publica
+   o `latest.json` (ou `latest-beta.json`) com versão, notas, data e, por
+   plataforma, a URL da tag e o conteúdo do `.sig`. Detalhe em "O manifesto do
+   canal" e "O gate: o feed só avança completo".
 
 ### `sig`: a forma, não o nome
 
@@ -298,24 +302,87 @@ arquivo**, não só no diretório.
 ### `id`: a chave da plataforma
 
 `id` é a chave `<os>-<arch>` do updater (`windows-x86_64`, `darwin-aarch64`,
-`linux-x86_64`, ...). Hoje ela é validada na forma e aparece no log; o manifesto
-por canal — o lote seguinte — a usa **literalmente** como chave da plataforma, e
-o valor do erro de digitação passa a ser um app que nunca recebe atualização.
+`linux-x86_64`, ...). Ela é usada **literalmente** como chave da plataforma no
+manifesto: um erro de digitação aqui não aparece no log — aparece como um app que
+nunca recebe atualização, porque o cliente procura a chave dele e não encontra.
 
-### `channel`
+### `channel`: qual feed esta release move
 
-`stable` (default) ou `beta`. Declarado agora e **inerte** até o manifesto por
-canal existir: nenhum gate de promoção, nenhuma checagem de que a tag de
-prerelease só entra no canal `beta`. Quando o manifesto entrar, ele é que lê
-esta chave.
+`stable` (default) ou `beta`. O canal decide **em que asset** o manifesto é
+publicado, e é isso que impede um beta de sobrescrever o feed de quem está no
+stable:
+
+| Canal | Asset | Observação |
+|---|---|---|
+| `stable` | `latest.json` | é o nome que o plugin procura por convenção |
+| `beta` | `latest-beta.json` | nome próprio, feed próprio |
+
+Uma tag prerelease (`v1.5.0-beta.1`) **não entra** no canal `stable`: um app do
+stable receberia uma versão de teste sem ter pedido. O contrário não é proibido —
+uma versão estável pode ser publicada no canal beta.
+
+### O manifesto do canal
+
+Com o bloco habilitado, o `finalize` publica o manifesto do canal como asset da
+release, depois de conferir as assinaturas e antes de o release virar público
+(assim o asset já existe no instante em que o rascunho é publicado):
+
+```json
+{
+  "version": "1.5.0",
+  "notes": "Notas da 1.5.0.",
+  "pub_date": "2026-11-01T12:00:00.000Z",
+  "platforms": {
+    "windows-x86_64": {
+      "signature": "conteúdo do .sig",
+      "url": "https://github.com/<owner>/<repo>/releases/download/v1.5.0/App_1.5.0_x64-setup.exe"
+    }
+  }
+}
+```
+
+O formato carrega quatro decisões:
+
+- **`signature` é o conteúdo do `.sig`**, não o nome do arquivo: é com ele que o
+  cliente verifica o pacote baixado.
+- **`url` nomeia a tag**, sempre (`/releases/download/<tag>/<arquivo>`). Nunca
+  `releases/latest`: um ponteiro móvel serviria o arquivo de outro release sob a
+  mesma URL, e o cliente instalaria uma versão diferente da anunciada.
+- **uma URL por plataforma**, e a **ordem de `sig`** é a preferência. Quem
+  declara dois bundles de updater (NSIS e MSI, por exemplo) decide qual é o alvo
+  da atualização pela ordem dos globs. Duas assinaturas casando a mesma forma é
+  ambíguo e reprova — normalmente é o `.sig` de uma execução anterior que ficou
+  na release.
+- **`notes` são as mesmas notas manuais do corpo** (`NOTES_DIR`/granularidade);
+  sem arquivo, string vazia. `pub_date` é o instante em que o manifesto foi
+  gerado (UTC).
+
+### O gate: o feed só avança completo
+
+O manifesto é tudo ou nada, e o bloqueio tem dois níveis — a diferença entre "não
+publique" e "não promova":
+
+| Nível | O que bloqueia | Casos |
+|---|---|---|
+| `release` | a publicação: o release **fica em rascunho** | plataforma declarada sem assinatura na release; duas assinaturas casando a mesma forma; artefato assinado ausente (a URL responderia 404); nome carregando outra versão (o artefato veio de outro build); `.sig` vazio; versão fora do SemVer; nenhuma plataforma declarada |
+| `feed` | só o manifesto: o release publica, o canal não anda | downgrade (o canal já serve versão maior); tag prerelease no canal `stable` |
+
+A release parcial pode existir — publicada à mão, se for o caso — mas o canal não
+anda: quem consulta o feed não a vê. É a diferença entre "existe uma release" e
+"existe uma atualização".
 
 ### O que este bloco ainda não faz
 
-- **Não gera `latest.json`** (o manifesto dinâmico do plugin). O `.sig` publicado
-  é o insumo; o manifesto por canal é o próximo lote.
-- **Não tem gate de promoção**: uma release parcial (uma plataforma que não
-  rodou) falha na conferência acima, mas nenhum canal automático é avançado nem
-  bloqueado por isso, porque ainda não existe canal.
+- **Não assina**: a chave privada e o `createUpdaterArtifacts` são do app. O Core
+  transporta a chave ao bundler e publica o que ele assinou.
+- **Não verifica a assinatura criptograficamente**: isso é do cliente, com a
+  chave pública dele. O Core garante que o `.sig` está na release, que o artefato
+  assinado também está e que o nome carrega esta versão.
+- **Não hospeda o endereço do feed**: o manifesto é um asset da tag. No stable, o
+  ponteiro `releases/latest/download/latest.json` do GitHub resolve para a
+  release publicada mais recente; no beta, uma release prerelease não é a
+  "latest", então o endereço do canal é do consumidor (branch próprio, página
+  estática ou a tag específica).
 
 ## Versão
 A cadeia é determinística: `vX.Y.Z` (tag) → `X.Y.Z`. O Core valida `package.json` (sempre canônico) e cada item de `versions.files` (json via campo aninhado com pontos; toml via seção `package.version`). Qualquer divergência falha antes do build.

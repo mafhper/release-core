@@ -43,7 +43,7 @@ prepare ──► build (matrix, fail-fast: false) ──► finalize
 
 - **prepare** (ubuntu): resolve/valida a tag, exporta a configuração, valida coerência, versão (`package.json` + `versions.files`), política de imagem, calcula `prev_tag`, detecta prerelease e cria/recupera o release **como rascunho** (idempotente, com retry). Se não há build declarado, marca `build_enabled=false`.
 - **build** (1 job por célula da matrix): instala só o necessário (apt/node/bun/rust conforme o contrato), instala as dependências do projeto pelo package manager declarado (`bun install --frozen-lockfile`/`npm ci`) na `build.working_directory` — **sempre que `package_manager` é declarado, inclusive em projetos desktop** —, executa gates → pre → build (ou `tauri-action` em projetos desktop), valida e envia artefatos com `--clobber` e retry. Com o bloco `updater`, a chave de assinatura é preparada antes do `tauri-action` e os `.sig` da célula são publicados do mesmo jeito.
-- **finalize**: confere a distribuição (e as assinaturas do updater, quando declarado) **antes** de qualquer publicação; **publica a arte** (resolve, sobe o asset e define `IMAGE_URL`) e **depois**, em um step seguinte, remonta o corpo (imagem + título/tagline + notas + seções + changelog em `<details>`); publica o release (`draft=false` e `prerelease` conforme semver) e atesta. Só roda se `prepare` passou e `build` passou ou foi pulado (nunca publica release parcial em caso de falha).
+- **finalize**: confere a distribuição (e as assinaturas do updater, quando declarado) **antes** de qualquer publicação; com o bloco `updater`, **gera e publica o manifesto do canal** (`latest.json`/`latest-beta.json`) logo depois dessa conferência e antes de o release virar público — o script imprime o caminho do manifesto em stdout, e saída vazia é "o canal não avança" (downgrade, prerelease no stable); **publica a arte** (resolve, sobe o asset e define `IMAGE_URL`) e **depois**, em um step seguinte, remonta o corpo (imagem + título/tagline + notas + seções + changelog em `<details>`); publica o release (`draft=false` e `prerelease` conforme semver) e atesta. Só roda se `prepare` passou e `build` passou ou foi pulado (nunca publica release parcial em caso de falha).
 
 ## Fases operacionais
 
@@ -79,6 +79,7 @@ Todos os testes ficam em `tests/` e rodam com `node --test`.
 | `image-step.sh` | Baixa a correção, resolve, sobe o asset com guarda por `digest` e define `IMAGE_URL` | `prepare` (resolve), `finalize` (publish) |
 | `release-body.sh` | Monta o corpo (imagem, título, tagline, notas, seções, changelog) | `finalize` |
 | `updater-signatures.mjs` | Publica o `.sig` de cada plataforma do updater declarada na célula (`collect`) e confere, na release, que cada plataforma tem assinatura (`verify`) | `build` (collect), `finalize` (verify) — **só** com o bloco `updater` |
+| `updater-manifest.mjs` | Monta o manifesto do canal (`latest.json`/`latest-beta.json`): versão, notas, data e, por plataforma, a URL da tag e o conteúdo do `.sig`. Imprime o caminho em stdout **só** quando o canal avança; bloqueios de release reprovam o passo, bloqueios de feed só param o canal | `finalize` — **só** com o bloco `updater` |
 
 ### `$GITHUB_ENV` entre steps
 

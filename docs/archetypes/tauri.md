@@ -158,9 +158,44 @@ cada versão, então `sig` declara a **forma** (globs), não o nome. Na conferê
 Core compara o nome do asset com o último segmento do glob: o token que distingue
 as plataformas (`x64`, `aarch64`) tem de estar no **nome do arquivo**.
 
-Ainda **fora** deste bloco: o `latest.json` (manifesto por canal) e o gate de
-promoção. Enquanto eles não existem, o app precisa de uma fonte de manifesto
-própria — o Core entrega o `.sig` publicado, e nada além.
+Depois da conferência, o `finalize` publica o **manifesto do canal**:
+
+```json
+{
+  "version": "1.5.0",
+  "notes": "Notas da 1.5.0.",
+  "pub_date": "2026-11-01T12:00:00.000Z",
+  "platforms": {
+    "windows-x86_64": {
+      "signature": "conteúdo do .sig",
+      "url": "https://github.com/<owner>/<repo>/releases/download/v1.5.0/App_1.5.0_x64-setup.exe"
+    }
+  }
+}
+```
+
+O asset se chama `latest.json` no canal `stable` e `latest-beta.json` no `beta`.
+Do lado do app, o `tauri.conf.json` aponta para ele:
+
+```jsonc
+"plugins": {
+  "updater": {
+    "endpoints": ["https://github.com/<owner>/<repo>/releases/latest/download/latest.json"],
+    "pubkey": "…"
+  }
+}
+```
+
+`releases/latest/download/latest.json` é o ponteiro **do feed** — a release
+publicada mais recente — e é o único lugar em que `latest` é legítimo: as URLs
+**dentro** do manifesto são por tag, para o arquivo baixado nunca ser de outra
+versão. No canal `beta` o ponteiro `latest` do GitHub não serve (uma release
+prerelease não é a "latest"), então o endereço do feed beta é do consumidor.
+
+O manifesto é tudo ou nada: plataforma sem `.sig`, duas assinaturas casando a
+mesma forma, artefato assinado ausente, `.sig` de outra versão ou versão fora do
+SemVer deixam o release em rascunho; downgrade e prerelease no canal `stable`
+publicam o release e **não** movem o canal.
 
 ## Observações
 
